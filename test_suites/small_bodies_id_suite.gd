@@ -171,7 +171,7 @@ func _list_small_body_groups() -> Dictionary:
 	return {"groups": groups}
 
 
-# Drives [IVSBGHUDsState.change_points_visibility]. SBG points default to
+# Drives [IVSBGHUDsState.change_symbols_visibility]. SBG symbols default to
 # hidden, so the FragmentIdentifier's sbg-point branch can't resolve a hover
 # until the group is toggled on. Note: persisted via
 # [member IVSBGHUDsState.PERSIST_PROPERTIES] and may be restored from a prior
@@ -198,7 +198,7 @@ func _set_small_body_points_visibility(params: Dictionary) -> Variant:
 	if !huds_state:
 		return {"_error": {"code": ERR_NOT_STARTED,
 				"message": "SBGHUDsState not available"}}
-	var previous: bool = huds_state.is_points_visible(sbg.sbg_alias)
+	var previous: bool = huds_state.is_symbols_visible(sbg.sbg_alias)
 	if previous != visible:
-		huds_state.change_points_visibility(sbg.sbg_alias, visible)
+		huds_state.change_symbols_visibility(sbg.sbg_alias, visible)
 	return {"ok": true, "previous": previous, "visible": visible}
