@@ -4,9 +4,17 @@ This file documents changes to [ivoyager_assistant](https://github.com/ivoyager/
 
 File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [v0.0.2] - UNRELEASED
+
+Under development using Godot 4.7.
+
+### Changed
+* Various updates for ivoyager_core v0.2.dev.
+
+
 ## v0.0.1 - 2025-06-29
 
-Released using Godot 4.7.
+Released using Godot 4.7. This release coincides with other ivoyager plugin releases at v0.1.2.
 
 ### Added
 * TCP server (IVAssistantServer autoload) providing a JSON-RPC-style interface on port 29071 for AI testing and accessibility.
@@ -47,3 +55,6 @@ Released using Godot 4.7.
 
 ### Removed
 * `MouseTargetIdSuite` (was `MouseHoverSuite`) no longer owns `IVSmallBodiesGroup`-based projection. The `small_body` mode of `project_to_screen` and `list_small_body_groups` are split into the new `SmallBodiesIdSuite` (file `small_bodies_id_suite.gd`, capability string `small_bodies_id`). The new suite gates both methods on `runtime.IVSmallBodiesGroup` (resolved at `simulator_started`), so projects that don't load any `IVSmallBodiesGroup` instances see the methods drop from the manifest. The asteroid projection method is now `project_small_body_to_screen` with flat `group` / `index` parameters (no nested `small_body` object). `tools/assistant_test.py` updated to match.
+
+
+[v0.0.2]: https://github.com/ivoyager/ivoyager_core/compare/v0.0.1...HEAD

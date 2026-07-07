@@ -348,9 +348,9 @@ func _get_body_state_vectors(params: Dictionary) -> Variant:
 		var time_num: float = time_var
 		time_val = time_num
 
-	var vectors: Array[Vector3] = body.get_state_vectors(time_val)
-	var pos: Vector3 = vectors[0]
-	var vel: Vector3 = vectors[1]
+	var vectors := body.get_state_vectors(time_val)
+	var pos := vectors[0]
+	var vel := vectors[1]
 
 	var response_time := time_val
 	if is_nan(response_time):
