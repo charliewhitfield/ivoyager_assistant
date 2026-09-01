@@ -39,13 +39,15 @@ func _on_about_to_free() -> void:
 
 
 func get_method_names() -> Array[String]:
-	return ["list_views", "apply_view"]
+	return ["list_views", "apply_view", "list_cached_views", "apply_cached_view"]
 
 
 func get_method_requirements() -> Dictionary:
 	return {
 		"list_views": ["program.ViewManager"],
 		"apply_view": ["program.ViewManager"],
+		"list_cached_views": ["program.ViewManager"],
+		"apply_cached_view": ["program.ViewManager"],
 	}
 
 
@@ -53,6 +55,8 @@ func get_method_summaries() -> Dictionary:
 	return {
 		"list_views": "List built-in named views with decoded target, tracking, framing, and affected state.",
 		"apply_view": "Apply a built-in named view by name (the standard way to frame the camera; e.g. VIEW_ZOOM).",
+		"list_cached_views": "List the user's own saved views, by 'name' and 'collection', with the same decoded fields.",
+		"apply_cached_view": "Apply one of the user's saved views ('name' plus 'collection'); reproduces a staging the user set up by hand.",
 	}
 
 
@@ -62,6 +66,10 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _list_views()
 		"apply_view":
 			return _apply_view(params)
+		"list_cached_views":
+			return _list_cached_views()
+		"apply_cached_view":
+			return _apply_cached_view(params)
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Unknown method: %s" % method}}
 
@@ -103,6 +111,58 @@ func _apply_view(params: Dictionary) -> Variant:
 
 	_view_manager.set_table_view(view_name, instant)
 	return {"ok": true, "name": String(view_name)}
+
+
+# The user's own saved views, which the built-in list does not carry. Keyed
+# "<name>.<collection>" in IVViewManager, and split back apart here because an
+# agent asked to reproduce a saved staging knows the name the user gave it, not
+# the composite key.
+func _list_cached_views() -> Dictionary:
+	var views := {}
+	for key: StringName in _view_manager.cached_views:
+		var view: IVView = _view_manager.cached_views[key]
+		var key_str := String(key)
+		var split := key_str.rfind(".")
+		views[key_str] = {
+			"scope": "cached",
+			"name": key_str.left(split) if split != -1 else key_str,
+			"collection": key_str.substr(split + 1) if split != -1 else "",
+			"target_name": String(view.target_name),
+			"tracking": _decode_tracking(view.camera_flags),
+			"up_lock": _decode_up_lock(view.camera_flags),
+			"view_position": _decode_view_position(view.view_position),
+			"affects": _decode_affects(view.flags),
+		}
+	return {"views": views}
+
+
+func _apply_cached_view(params: Dictionary) -> Variant:
+	var name_var: Variant = params.get("name")
+	if typeof(name_var) != TYPE_STRING or name_var == "":
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "Missing or invalid 'name' parameter"}}
+	var view_name: String = name_var
+	var collection_var: Variant = params.get("collection", "")
+	if typeof(collection_var) != TYPE_STRING:
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "'collection' must be a string"}}
+	var collection_name: String = collection_var
+	if !_view_manager.has_view(view_name, collection_name, true):
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "Unknown cached view: '%s' in collection '%s'" % [view_name,
+				collection_name] + " (call list_cached_views for valid names)"}}
+
+	var instant := false
+	var instant_var: Variant = params.get("instant")
+	if instant_var != null:
+		if typeof(instant_var) != TYPE_BOOL:
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'instant' must be a boolean"}}
+		var instant_bool: bool = instant_var
+		instant = instant_bool
+
+	_view_manager.set_view(view_name, collection_name, true, instant)
+	return {"ok": true, "name": view_name, "collection": collection_name}
 
 
 # =============================================================================

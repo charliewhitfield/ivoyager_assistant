@@ -9,6 +9,9 @@ File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Under development using Godot 4.7.1.
 
+### Added
+* Methods `list_cached_views` and `apply_cached_view` in the view suite, so an agent can reproduce a staging the user set up and saved by hand rather than hunting for it by trial and error. `apply_cached_view` takes the view's `name` and its `collection`; `list_cached_views` reports both, alongside the same decoded fields `list_views` gives for the built-in views.
+
 
 ## [v0.0.2] - 2026-08-01
 
