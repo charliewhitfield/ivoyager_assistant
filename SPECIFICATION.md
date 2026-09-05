@@ -616,7 +616,7 @@ For `small_body`, the response also includes `"name": "<asteroid name>"` (the en
 
 **Limitations of asteroid projection:**
 - Trojan / Lagrange-point groups (`lp_integer != -1`) are rejected; their librating positions need a different model.
-- Precession of LAN and AP (rates from `IVSmallBodiesGroup.s_g_mag_de`) is not applied. For main-belt asteroids the per-decade drift is well within `IVFragmentIdentifier`'s ~9-pixel sample radius, so the projected pixel still falls inside the rendered point's identification grid for typical sim time deltas from epoch.
+- Precession of LAN and AP (rates from `IVSmallBodiesGroup.s_g_mag`) is not applied. For main-belt asteroids the per-decade drift is well within `IVFragmentIdentifier`'s ~9-pixel sample radius, so the projected pixel still falls inside the rendered point's identification grid for typical sim time deltas from epoch. The mean anomaly rate, by contrast, is applied through `IVSmallBodiesGroup.get_mean_anomaly_rate()` — the stored `n` is the mean longitude rate, so using it directly would drift by `g` per unit time.
 
 #### `list_small_body_groups`
 Enumerate loaded `IVSmallBodiesGroup` instances. Useful for discovering valid `small_body.group` values for `project_to_screen`.
