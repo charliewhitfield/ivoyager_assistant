@@ -27,6 +27,7 @@ var _speed_manager: IVSpeedManager
 var _timekeeper: IVTimekeeper
 var _camera_handler: IVCameraHandler
 var _body_huds_state: IVBodyHUDsState
+var _sbg_huds_state: IVSBGHUDsState
 
 
 func _on_simulator_started() -> void:
@@ -37,6 +38,7 @@ func _on_simulator_started() -> void:
 	_timekeeper = IVGlobal.program.get(&"Timekeeper")
 	_camera_handler = IVGlobal.program.get(&"CameraHandler")
 	_body_huds_state = IVGlobal.program.get(&"BodyHUDsState")
+	_sbg_huds_state = IVGlobal.program.get(&"SBGHUDsState")
 
 
 func _on_about_to_free() -> void:
@@ -45,6 +47,7 @@ func _on_about_to_free() -> void:
 	_timekeeper = null
 	_camera_handler = null
 	_body_huds_state = null
+	_sbg_huds_state = null
 
 
 func get_method_names() -> Array[String]:
@@ -53,6 +56,7 @@ func get_method_names() -> Array[String]:
 		"set_time", "move_camera", "show_hide_gui",
 		"list_actions", "press_action",
 		"set_all_body_orbits_visibility", "set_body_orbit_visible_flags",
+		"set_huds",
 	]
 
 
@@ -65,6 +69,7 @@ func get_method_requirements() -> Dictionary:
 		"set_time": ["program.Timekeeper", "core.allow_time_setting"],
 		"set_all_body_orbits_visibility": ["program.BodyHUDsState"],
 		"set_body_orbit_visible_flags": ["program.BodyHUDsState"],
+		"set_huds": ["program.BodyHUDsState"],
 	}
 
 
@@ -92,6 +97,8 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _set_all_body_orbits_visibility(params)
 		"set_body_orbit_visible_flags":
 			return _set_body_orbit_visible_flags(params)
+		"set_huds":
+			return _set_huds(params)
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Unknown method: %s" % method}}
 
@@ -338,11 +345,34 @@ func _move_camera(params: Dictionary) -> Dictionary:
 		var instant_bool: bool = instant_var
 		instant = instant_bool
 
+	# Parse tracking (optional). This decides what a view_position MEANS: "ecliptic" is
+	# the ecliptic frame, "orbit" the target's orbit frame, and "ground" the target's own
+	# rotating frame -- so latitude is a latitude ON the body, which is the only one of the
+	# three that lets a caller pose relative to a body's equator (or its ring plane).
+	var tracking_flag := 0
+	var tracking_var: Variant = params.get("tracking")
+	if tracking_var != null:
+		if typeof(tracking_var) != TYPE_STRING:
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'tracking' must be a string"}}
+		var tracking: String = tracking_var
+		match tracking:
+			"ground":
+				tracking_flag = IVCamera.CameraFlags.CAMERAFLAGS_TRACK_GROUND
+			"orbit":
+				tracking_flag = IVCamera.CameraFlags.CAMERAFLAGS_TRACK_ORBIT
+			"ecliptic":
+				tracking_flag = IVCamera.CameraFlags.CAMERAFLAGS_TRACK_ECLIPTIC
+			_:
+				return {"_error": {"code": ERR_INVALID_PARAMS,
+						"message": "'tracking' must be 'ground', 'orbit' or 'ecliptic'"}}
+
 	# Execute camera move
 	if has_target:
-		_camera_handler.move_to_by_name(target_sn, 0, view_position, view_rotations, instant)
+		_camera_handler.move_to_by_name(target_sn, tracking_flag, view_position, view_rotations,
+				instant)
 	else:
-		_camera_handler.move_to(null, 0, view_position, view_rotations, instant)
+		_camera_handler.move_to(null, tracking_flag, view_position, view_rotations, instant)
 
 	return {"ok": true}
 
@@ -403,6 +433,37 @@ func _set_body_orbit_visible_flags(params: Dictionary) -> Variant:
 		"previous_flags": previous_flags,
 		"orbit_visible_flags": _body_huds_state.orbit_visible_flags,
 		"all_flags": _body_huds_state.all_flags,
+	}
+
+
+# Sets every 3D HUD overlay at once, absolutely rather than by toggling: orbit lines,
+# names and symbols, plus the small-body point groups when that system is present. An
+# evaluation screenshot needs a frame with nothing drawn over the subject, and the
+# `toggle_*` actions cannot deliver one - each is a toggle whose result depends on the
+# state the session started in (a cached view may already have them hidden, in which case
+# pressing the action turns them ON). Returns the resulting flags so the caller can
+# confirm rather than assume.
+func _set_huds(params: Dictionary) -> Variant:
+	var visible_var: Variant = params.get("visible")
+	if typeof(visible_var) != TYPE_BOOL:
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "Missing or invalid 'visible' parameter (must be bool)"}}
+	var visible: bool = visible_var
+	if visible:
+		_body_huds_state.set_default_visibilities()
+		if _sbg_huds_state:
+			_sbg_huds_state.set_default_visibilities()
+	else:
+		_body_huds_state.hide_all()
+		if _sbg_huds_state:
+			_sbg_huds_state.hide_all()
+	return {
+		"ok": true,
+		"visible": visible,
+		"orbit_visible_flags": _body_huds_state.orbit_visible_flags,
+		"name_visible_flags": _body_huds_state.name_visible_flags,
+		"symbol_visible_flags": _body_huds_state.symbol_visible_flags,
+		"small_bodies_huds": _sbg_huds_state != null,
 	}
 
 

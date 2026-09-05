@@ -379,6 +379,7 @@ Low-level camera move. **Prefer the view methods (§4.10) for the common "frame 
 - `target` (string, optional) — Body name to move to. Omit to keep the current target.
 - `view_position` (array, optional) — `[longitude, latitude, perspective_distance]`. The third element is a *perspective distance*, not meters: scaled by the target's radius when near, blending to an absolute distance when far. This is an `IVCamera` internal — see the `IVCamera` / `IVCameraHandler` class docs (this spec does not restate the formula). Omit to keep the current framing.
 - `view_rotations` (array, optional) — `[pitch, yaw, roll]` Euler offsets.
+- `tracking` (string, optional) — `"ecliptic"`, `"orbit"` or `"ground"`. Decides what `view_position`'s longitude and latitude are measured in; omit to leave the camera's current tracking mode alone. **`"ground"` is the target's own rotating frame, so latitude is a latitude ON the body** — the only one of the three that poses relative to a body's equator, and therefore to its ring plane. The default `"orbit"` and `"ecliptic"` modes measure latitude in a frame the body's obliquity is tilted from, so posing a ringed planet by latitude there sweeps neither the ring opening angle nor anything else meaningful (measured on Saturn: ecliptic latitude 0° leaves the rings ~26° open and −26° puts them edge-on).
 - `instant` (bool, optional) — Skip animation. Default: false.
 
 **Result:** `{"ok": true}`
@@ -498,6 +499,16 @@ Emulates a user hotkey press. Injects a real `InputEventKey` into Godot's input 
 **Result:** `{"ok": true, "action": "toggle_orbits"}`
 
 Note: Camera movement actions (e.g. `camera_up`) are designed for sustained key holds. An instant press+release has negligible effect — use `move_camera` for camera positioning instead.
+
+Note: the `toggle_*` HUD actions are **toggles**, so what they leave on screen depends on the state the session started in — a cached view that already hides the orbit lines will have them *shown* by `press_action toggle_orbits`. Use `set_huds` for a deterministic result.
+
+#### `set_huds`
+Sets every 3D HUD overlay at once, absolutely rather than by toggling: orbit lines, names and symbols, plus the small-body point groups when `IVSBGHUDsState` is present. This is what an evaluation screenshot needs — `screenshot`'s `hide_gui` hides the 2D GUI and nothing else, so orbit lines, labels and the asteroid point cloud still draw over the subject.
+
+**Params:**
+- `visible` (bool, required) — `false` hides everything; `true` restores each system's default visibilities (not necessarily what was on screen before).
+
+**Result:** `{"ok": true, "visible": false, "orbit_visible_flags": 0, "name_visible_flags": 0, "symbol_visible_flags": 0, "small_bodies_huds": true}` — the flags are returned so a caller can confirm the frame is clean rather than assume it.
 
 ### 4.8 GUI Inspection
 
@@ -765,7 +776,7 @@ The `[assistant_test_suites]` section registers `IVAssistantTestSuite` subclasse
 | Suite | Methods |
 |---|---|
 | `StateQuerySuite` | `get_time`, `get_selection`, `get_camera`, `list_bodies`, `get_body_info`, `get_body_position`, `get_body_orbit`, `get_body_distance`, `get_body_state_vectors` |
-| `ControlSuite` | `select_body`, `select_navigate`, `set_pause`, `set_speed`, `set_time`, `move_camera`, `show_hide_gui`, `list_actions`, `press_action`, `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags` |
+| `ControlSuite` | `select_body`, `select_navigate`, `set_pause`, `set_speed`, `set_time`, `move_camera`, `show_hide_gui`, `list_actions`, `press_action`, `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_huds` |
 | `ViewSuite` | `list_views`, `apply_view` |
 | `CoreTestSuite` | `screenshot`, `save_game`, `load_game`, `get_save_status` |
 | `GuiInspectionSuite` | `find_nodes`, `inspect_node`, `read_node_text` |
