@@ -53,7 +53,7 @@ func _on_about_to_free() -> void:
 func get_method_names() -> Array[String]:
 	return [
 		"select_body", "select_navigate", "set_pause", "set_speed",
-		"set_time", "move_camera", "show_hide_gui",
+		"set_time", "move_camera", "set_camera_fov", "show_hide_gui",
 		"list_actions", "press_action",
 		"set_all_body_orbits_visibility", "set_body_orbit_visible_flags",
 		"set_huds",
@@ -87,6 +87,8 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _set_time(params)
 		"move_camera":
 			return _move_camera(params)
+		"set_camera_fov":
+			return _set_camera_fov(params)
 		"show_hide_gui":
 			return _show_hide_gui(params)
 		"list_actions":
@@ -375,6 +377,50 @@ func _move_camera(params: Dictionary) -> Dictionary:
 		_camera_handler.move_to(null, tracking_flag, view_position, view_rotations, instant)
 
 	return {"ok": true}
+
+
+# Zoom is the one camera property a viewer changes constantly and no other method
+# reaches. It takes a focal length as well as an fov because the GUI widget is
+# denominated that way and a caller reasoning about apparent size thinks in
+# millimetres; the two are one number through IVMath, and both are reported back.
+func _set_camera_fov(params: Dictionary) -> Dictionary:
+	var camera := _get_camera()
+	if !camera:
+		return {"_error": {"code": ERR_INVALID_PARAMS, "message": "No current IVCamera"}}
+	var fov_var: Variant = params.get("fov")
+	var focal_length_var: Variant = params.get("focal_length")
+	if (fov_var == null) == (focal_length_var == null):
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "Supply exactly one of 'fov' or 'focal_length'"}}
+	if fov_var != null:
+		if typeof(fov_var) != TYPE_FLOAT and typeof(fov_var) != TYPE_INT:
+			return {"_error": {"code": ERR_INVALID_PARAMS, "message": "'fov' must be a number"}}
+		var fov: float = fov_var
+		if fov <= 0.0 or fov >= 180.0:
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'fov' must be in (0, 180)"}}
+		camera.set_field_of_view(fov)
+	else:
+		if (typeof(focal_length_var) != TYPE_FLOAT
+				and typeof(focal_length_var) != TYPE_INT):
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'focal_length' must be a number"}}
+		var focal_length: float = focal_length_var
+		if focal_length <= 0.0:
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'focal_length' must be > 0"}}
+		camera.set_focal_length(focal_length)
+	return {"fov": camera.fov, "focal_length": IVMath.get_focal_length_from_fov(camera.fov)}
+
+
+# The viewport's own current camera rather than IVCameraHandler's private member,
+# so this keeps working for a project that swaps cameras.
+func _get_camera() -> IVCamera:
+	var viewport := IVGlobal.get_viewport()
+	if !viewport:
+		return null
+	var camera := viewport.get_camera_3d()
+	return camera as IVCamera
 
 
 func _show_hide_gui(params: Dictionary) -> Dictionary:
