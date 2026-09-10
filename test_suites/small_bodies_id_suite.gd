@@ -131,9 +131,11 @@ func _world_pos_from_small_body(params: Dictionary) -> Variant:
 	# Kepler-derived position in Godot scene-tree units (the points shader
 	# reads the same arrays to render vertex positions in world space), so no
 	# unit scaling is needed. Anchor in world coords by adding the primary's
-	# global_position. Precession (s, g rates from sbg.s_g_mag_de) is ignored
-	# — for main-belt asteroids the per-decade drift is well within the
-	# fragment identifier's ~9-pixel sample radius.
+	# global_position. Precession of lan and ap (the s and g rates in sbg.s_g_mag) is
+	# ignored — for main-belt asteroids the per-decade drift is well within the
+	# fragment identifier's ~9-pixel sample radius. The mean anomaly rate is not
+	# ignorable the same way: element 6 is the mean LONGITUDE rate, so g comes back
+	# out of it (see IVSmallBodiesGroup.get_mean_anomaly_rate).
 	var elements: Array[float] = sbg.get_orbit_elements(index)
 	var a: float = elements[0]
 	var e: float = elements[1]
@@ -141,9 +143,8 @@ func _world_pos_from_small_body(params: Dictionary) -> Variant:
 	var lan: float = elements[3]
 	var ap: float = elements[4]
 	var m0: float = elements[5]
-	var n: float = elements[6]
 	var current_time: float = IVGlobal.times[0]
-	var mean_anomaly: float = m0 + n * current_time
+	var mean_anomaly: float = m0 + sbg.get_mean_anomaly_rate(index) * current_time
 	var true_anomaly: float = IVOrbit.get_true_anomaly_from_mean_anomaly_elliptic(
 			e, mean_anomaly)
 	var semi_parameter: float = a * (1.0 - e * e)
