@@ -5,9 +5,9 @@ This file documents changes to [ivoyager_assistant](https://github.com/ivoyager/
 File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
-## [v0.0.3] - UNRELEASED
+## [v0.0.3] - 2026-10-15
 
-Under development using Godot 4.7.1.
+Released using Godot 4.7.2. This release coincides with Core plugin release v0.2.1.
 
 ### Added
 * Command-line arguments `--assistant-port` and `--assistant-instance` (after `--`) override the configured port and tag the process, so one machine can run several instances at once; `get_project_info` reports `process_id`, `port` and `instance_id`. `GodotLauncher` in `tools/assistant_test.py` uses them: `port=0` launches on a free port, `check_instance()` verifies a client reached its own instance, and the launched Godot dies with its script on Windows. See SPECIFICATION.md §7.3.
@@ -73,5 +73,5 @@ Released using Godot 4.7. This release coincides with other ivoyager plugin rele
 * `MouseTargetIdSuite` (was `MouseHoverSuite`) no longer owns `IVSmallBodiesGroup`-based projection. The `small_body` mode of `project_to_screen` and `list_small_body_groups` are split into the new `SmallBodiesIdSuite` (file `small_bodies_id_suite.gd`, capability string `small_bodies_id`). The new suite gates both methods on `runtime.IVSmallBodiesGroup` (resolved at `simulator_started`), so projects that don't load any `IVSmallBodiesGroup` instances see the methods drop from the manifest. The asteroid projection method is now `project_small_body_to_screen` with flat `group` / `index` parameters (no nested `small_body` object). `tools/assistant_test.py` updated to match.
 
 
-[v0.0.3]: https://github.com/ivoyager/ivoyager_assistant/compare/v0.0.2...HEAD
+[v0.0.3]: https://github.com/ivoyager/ivoyager_assistant/compare/v0.0.2...v0.0.3
 [v0.0.2]: https://github.com/ivoyager/ivoyager_assistant/compare/v0.0.1...v0.0.2
