@@ -484,11 +484,9 @@ func _set_body_orbit_visible_flags(params: Dictionary) -> Variant:
 
 # Sets every 3D HUD overlay at once, absolutely rather than by toggling: orbit lines,
 # names and symbols, plus the small-body point groups when that system is present. An
-# evaluation screenshot needs a frame with nothing drawn over the subject, and the
-# `toggle_*` actions cannot deliver one - each is a toggle whose result depends on the
-# state the session started in (a cached view may already have them hidden, in which case
-# pressing the action turns them ON). Returns the resulting flags so the caller can
-# confirm rather than assume.
+# evaluation screenshot needs a frame with nothing drawn over the subject, and a hotkey
+# toggle cannot promise one - its result depends on the state it found. Returns the
+# resulting flags so the caller can confirm rather than assume.
 func _set_huds(params: Dictionary) -> Variant:
 	var visible_var: Variant = params.get("visible")
 	if typeof(visible_var) != TYPE_BOOL:
