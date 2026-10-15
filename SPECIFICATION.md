@@ -482,9 +482,7 @@ Returns all registered input actions with their display names. Actions are defin
 ```json
 {
   "actions": {
-	"toggle_orbits": "Show/Hide Orbits",
-	"toggle_names": "Show/Hide Names",
-	"toggle_symbols": "Show/Hide Symbols",
+	"toggle_all_huds": "Show/Hide All HUDs",
 	"toggle_pause": "Toggle Pause",
 	"recenter": "Recenter",
     "..."
@@ -496,13 +494,13 @@ Returns all registered input actions with their display names. Actions are defin
 Emulates a user hotkey press. Injects a real `InputEventKey` into Godot's input pipeline via `Input.parse_input_event()`, so it flows through `_shortcut_input()` handlers exactly like a physical key press. Both press and release events are injected.
 
 **Params:**
-- `action` (string, required) — Action name from `list_actions` (e.g. `"toggle_orbits"`)
+- `action` (string, required) — Action name from `list_actions` (e.g. `"toggle_pause"`)
 
-**Result:** `{"ok": true, "action": "toggle_orbits"}`
+**Result:** `{"ok": true, "action": "toggle_pause"}`
 
 Note: Camera movement actions (e.g. `camera_up`) are designed for sustained key holds. An instant press+release has negligible effect — use `move_camera` for camera positioning instead.
 
-Note: the `toggle_*` HUD actions are **toggles**, so what they leave on screen depends on the state the session started in — a cached view that already hides the orbit lines will have them *shown* by `press_action toggle_orbits`. Use `set_huds` for a deterministic result.
+Note: `toggle_all_huds` is a **toggle**, so what it leaves on screen depends on whether the HUDs were already hidden. Use `set_huds` for a deterministic result.
 
 #### `set_huds`
 Sets every 3D HUD overlay at once, absolutely rather than by toggling: orbit lines, names and symbols, plus the small-body point groups when `IVSBGHUDsState` is present. This is what an evaluation screenshot needs — `screenshot`'s `hide_gui` hides the 2D GUI and nothing else, so orbit lines, labels and the asteroid point cloud still draw over the subject.

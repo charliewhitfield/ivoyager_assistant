@@ -5,6 +5,14 @@ This file documents changes to [ivoyager_assistant](https://github.com/ivoyager/
 File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [v0.0.4] - 2026-10-15
+
+Released using Godot 4.7.2. This release coincides with Core plugin release v0.2.2.
+
+### Changed
+* SPECIFICATION.md's `list_actions` and `press_action` examples no longer use `toggle_orbits`, `toggle_names` or `toggle_symbols`, which Core v0.2.2 removes.
+
+
 ## [v0.0.3] - 2026-10-15
 
 Released using Godot 4.7.2. This release coincides with Core plugin release v0.2.1.
@@ -73,5 +81,6 @@ Released using Godot 4.7. This release coincides with other ivoyager plugin rele
 * `MouseTargetIdSuite` (was `MouseHoverSuite`) no longer owns `IVSmallBodiesGroup`-based projection. The `small_body` mode of `project_to_screen` and `list_small_body_groups` are split into the new `SmallBodiesIdSuite` (file `small_bodies_id_suite.gd`, capability string `small_bodies_id`). The new suite gates both methods on `runtime.IVSmallBodiesGroup` (resolved at `simulator_started`), so projects that don't load any `IVSmallBodiesGroup` instances see the methods drop from the manifest. The asteroid projection method is now `project_small_body_to_screen` with flat `group` / `index` parameters (no nested `small_body` object). `tools/assistant_test.py` updated to match.
 
 
+[v0.0.4]: https://github.com/ivoyager/ivoyager_assistant/compare/v0.0.3...v0.0.4
 [v0.0.3]: https://github.com/ivoyager/ivoyager_assistant/compare/v0.0.2...v0.0.3
 [v0.0.2]: https://github.com/ivoyager/ivoyager_assistant/compare/v0.0.1...v0.0.2
