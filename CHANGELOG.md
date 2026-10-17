@@ -5,6 +5,14 @@ This file documents changes to [ivoyager_assistant](https://github.com/ivoyager/
 File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [v0.0.5] - UNRELEASED
+
+Under development using Godot 4.7.2.
+
+### Changed
+* `GodotLauncher` in `tools/assistant_test.py` holds each launched Godot to one logical processor of each core on Windows, which can otherwise put the busy threads of instances run at once two to a core; `one_per_core=False` leaves it unpinned. See SPECIFICATION.md §7.3.
+
+
 ## [v0.0.4] - 2026-10-15
 
 Released using Godot 4.7.2. This release coincides with Core plugin release v0.2.2.

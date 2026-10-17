@@ -837,7 +837,7 @@ Two command-line user arguments (after Godot's `--` separator) override these pe
 Godot_v4.7.2-stable_win64_console.exe --headless --path <project> -- --assistant-port=29072 --assistant-instance=run-a
 ```
 
-`GodotLauncher` in `tools/assistant_test.py` passes both: its `port` defaults to 29071, and `port=0` picks a free one (read back as `launcher.port`). After connecting, `check_instance()` verifies the echo. Its launched Godot also dies with the Python process that started it, even one killed outright (Windows), so an aborted script leaves no instance holding a port.
+`GodotLauncher` in `tools/assistant_test.py` passes both: its `port` defaults to 29071, and `port=0` picks a free one (read back as `launcher.port`). After connecting, `check_instance()` verifies the echo. Its launched Godot also dies with the Python process that started it, even one killed outright (Windows), so an aborted script leaves no instance holding a port. And it is held to one logical processor of each core (Windows), since Windows can otherwise put the busy threads of instances run at once two to a core, each running slower than it would alone; `one_per_core=False` leaves it where the OS puts it.
 
 ### 7.4 Project-supplied readiness predicate
 
@@ -967,7 +967,7 @@ python tools/assistant_test.py --port 29072     # custom port
 python tools/assistant_test.py --launch --headless  # no rendering; skips the hover test
 ```
 
-With `--launch`, the script starts Godot on a free port (unless `--port` is given), so several runs can go at once. The launched Godot does not outlive the script, even if the script is killed (Windows).
+With `--launch`, the script starts Godot on a free port (unless `--port` is given), so several runs can go at once. The launched Godot does not outlive the script, even if the script is killed, and is held to one logical processor of each core (Windows).
 
 The script is capability-aware: it checks the `capabilities` array from `get_project_info` and skips tests for features the project does not support. Exit code is 0 on success, 1 on failure.
 

@@ -28,17 +28,56 @@ import uuid
 
 
 DEFAULT_PORT = 29071
+CREATE_SUSPENDED = 0x4
 
 
-def _kill_on_exit(proc):
-    """Ties `proc` to this Python process, so it dies with it (Windows only).
+def _one_processor_per_core(kernel32):
+    """An affinity mask of one logical processor in each core this process
+    may run on, or 0 if the processors can't be read (Windows only)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessorInfo(ctypes.Structure):
+        _fields_ = [
+            ("processor_mask", ctypes.c_size_t),
+            ("relationship", ctypes.c_int),
+            ("reserved", ctypes.c_ulonglong * 2),
+        ]
+
+    RELATION_PROCESSOR_CORE = 0
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessAffinityMask.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_size_t)]
+    process_mask = ctypes.c_size_t()
+    system_mask = ctypes.c_size_t()
+    if not kernel32.GetProcessAffinityMask(
+            kernel32.GetCurrentProcess(), ctypes.byref(process_mask), ctypes.byref(system_mask)):
+        return 0
+    length = wintypes.DWORD(0)
+    kernel32.GetLogicalProcessorInformation(None, ctypes.byref(length))
+    infos = (ProcessorInfo * (length.value // ctypes.sizeof(ProcessorInfo)))()
+    if not kernel32.GetLogicalProcessorInformation(infos, ctypes.byref(length)):
+        return 0
+    mask = 0
+    for info in infos:
+        if info.relationship == RELATION_PROCESSOR_CORE:
+            allowed = info.processor_mask & process_mask.value
+            mask |= allowed & -allowed
+    return mask
+
+
+def _hold_in_job(proc, one_per_core):
+    """Holds `proc`, created suspended, in a job tied to this Python process,
+    then resumes it (Windows only; elsewhere returns None).
 
     A test script that is killed outright (a timeout, a task runner stopping
     it) never reaches its cleanup, and the Godot it launched would run on
     holding its port. A job object that kills its members when its last
-    handle closes lets the OS clean up instead. Godot's console wrapper
-    holds the real game process in a job of its own, so killing the wrapper
-    is enough.
+    handle closes lets the OS clean up instead. With `one_per_core` the job
+    also holds its members to one logical processor of each core, since
+    Windows puts the busy threads of games run at once two to a core.
+    Returns the job, whose handle must stay open for as long as Godot should
+    live. If `proc` can't be resumed, it is killed and the error raised.
     """
     if sys.platform != "win32":
         return None
@@ -74,23 +113,34 @@ def _kill_on_exit(proc):
         ]
 
     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+    JOB_OBJECT_LIMIT_AFFINITY = 0x10
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll")
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        return None
-    limits = ExtendedLimits()
-    limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    ok = kernel32.SetInformationJobObject(
-        wintypes.HANDLE(job), JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-        ctypes.byref(limits), ctypes.sizeof(limits))
-    ok = ok and kernel32.AssignProcessToJobObject(
-        wintypes.HANDLE(job), wintypes.HANDLE(int(proc._handle)))
-    if not ok:
-        print("GodotLauncher: could not tie Godot to this process (error %d);"
-              " it will outlive a killed script" % ctypes.get_last_error())
-    return job  # the handle must stay open for as long as Godot should live
+    handle = wintypes.HANDLE(int(proc._handle))
+    try:
+        job = kernel32.CreateJobObjectW(None, None)
+        limits = ExtendedLimits()
+        limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        affinity = _one_processor_per_core(kernel32) if one_per_core else 0
+        if affinity:
+            limits.basic.limit_flags |= JOB_OBJECT_LIMIT_AFFINITY
+            limits.basic.affinity = affinity
+        ok = bool(job) and kernel32.SetInformationJobObject(
+            wintypes.HANDLE(job), JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits), ctypes.sizeof(limits))
+        ok = ok and kernel32.AssignProcessToJobObject(wintypes.HANDLE(job), handle)
+        if not ok:
+            print("GodotLauncher: could not hold Godot in a job (error %d); it will"
+                  " outlive a killed script and share cores" % ctypes.get_last_error())
+        # Popen keeps no handle to the main thread it created suspended.
+        if ntdll.NtResumeProcess(handle) != 0:
+            raise OSError("GodotLauncher: could not resume the Godot it launched")
+    except BaseException:
+        proc.kill()
+        raise
+    return job
 
 
 _ports_handed_out = set()
@@ -133,7 +183,11 @@ class GodotLauncher:
     not another one holding the port.
 
     A launched Godot does not outlive the Python process that launched it,
-    even when that process is killed outright (Windows).
+    even when that process is killed outright (Windows). It is also held to
+    one logical processor of each core (Windows), because Windows otherwise
+    puts the busy threads of games run at once two to a core and each runs
+    slower than it would alone; one_per_core=False leaves them where the OS
+    puts them.
 
     Usage:
         launcher = GodotLauncher(godot_exe, project_dir, port=0)
@@ -154,11 +208,12 @@ class GodotLauncher:
     )
 
     def __init__(self, godot, project, leak_markers=None, tail_lines=30,
-                 extra_args=(), port=DEFAULT_PORT):
+                 extra_args=(), port=DEFAULT_PORT, one_per_core=True):
         self.godot = godot
         self.project = project
         self.extra_args = list(extra_args)
         self.port = port or pick_free_port()
+        self.one_per_core = one_per_core
         self.instance_id = uuid.uuid4().hex
         self.leak_markers = tuple(
             m.lower() for m in (leak_markers or self.DEFAULT_LEAK_MARKERS))
@@ -178,8 +233,11 @@ class GodotLauncher:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            # Godot's console wrapper starts the game as a child process at
+            # once, and only a child started inside the job is held by it.
+            creationflags=CREATE_SUSPENDED if sys.platform == "win32" else 0,
         )
-        self._job = _kill_on_exit(self._proc)
+        self._job = _hold_in_job(self._proc, self.one_per_core)
         # Daemon reader thread keeps the kernel pipe drained so long runs
         # (e.g. economy tests spanning game-years) never block on a full buffer.
         self._reader = threading.Thread(target=self._drain, daemon=True)
