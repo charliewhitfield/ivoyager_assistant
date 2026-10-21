@@ -366,6 +366,17 @@ func get_declaration(script: Script) -> Declaration:
 		if !declaration.property_infos.has(property):
 			declaration.property_infos[property] = info
 	var native := script.get_instance_base_type()
+	for property in declaration.properties + declaration.key:
+		if declaration.property_infos.has(property):
+			continue
+		var constant_level := script
+		while constant_level: # a declared constant
+			var constants := constant_level.get_script_constant_map()
+			if constants.has(property):
+				declaration.property_infos[property] = {"name": property,
+						"type": typeof(constants[property])}
+				break
+			constant_level = constant_level.get_base_script()
 	for method in declaration.methods:
 		if !declaration.method_infos.has(method):
 			for info in ClassDB.class_get_method_list(native):

@@ -2,9 +2,10 @@
 """Generic I, Voyager test runner for the ivoyager_assistant TCP server.
 
 Implements the full test sequence from SPECIFICATION.md section 9.3:
-discover capabilities, start simulation, verify state, exercise controls,
-save/load cycle, and quit. Tests are capability-aware and skip gracefully
-when a project lacks specific features.
+discover, start simulation, verify state, exercise controls and widgets,
+mouse hover, save/load cycle, and quit. Tests use the members a project's
+classes declare (describe, get, call) and skip gracefully when a project
+lacks them.
 
 Usage:
     python assistant_test.py                  # game already running
@@ -408,13 +409,16 @@ class AssistantClient:
 # =============================================================================
 
 class TestRunner:
-    """Runs the generic I, Voyager test sequence (SPECIFICATION.md section 9)."""
+    """Runs the generic I, Voyager test sequence (SPECIFICATION.md section 9)
+    against the members a project's classes declare, as `describe` reports them.
+    A step whose object or member the project lacks is skipped."""
 
     def __init__(self, client, skip_save=False, skip_hover=False):
         self.client = client
         self.skip_save = skip_save
         self.skip_hover = skip_hover
         self.capabilities = []
+        self.described = {"objects": {}, "classes": {}, "enums": {}, "widgets": []}
         self.passed = 0
         self.failed = 0
         self.skipped = 0
@@ -422,6 +426,22 @@ class TestRunner:
 
     def has_cap(self, name):
         return name in self.capabilities
+
+    def has_member(self, address, member):
+        """Whether the object named `address` (or the class, for a keyed address)
+        declares `member` and it is available now."""
+        if isinstance(address, dict):
+            entry = self.described["classes"].get(address.get("class"), {})
+        else:
+            entry = self.described["objects"].get(address, {})
+        declared = member in entry.get("methods", {}) or member in entry.get("properties", {})
+        return declared and member not in entry.get("unavailable", [])
+
+    def instances(self, class_name):
+        return self.described["classes"].get(class_name, {}).get("instances", [])
+
+    def refresh(self):
+        self.described = self.client.describe()
 
     def assert_true(self, condition, message):
         if condition:
@@ -442,13 +462,12 @@ class TestRunner:
         self.skipped += 1
         print("  SKIP: %s" % message)
 
-    def poll_state(self, condition_fn, description, timeout=60, interval=1.0):
-        """Poll get_state until condition_fn(result) is True."""
+    def poll(self, condition_fn, description, timeout=60, interval=1.0):
+        """Poll condition_fn() until it is truthy; returns its value or None."""
         for _ in range(int(timeout / interval)):
-            resp = self.client.call("get_state")
-            result = resp.get("result", {})
-            if condition_fn(result):
-                return result
+            value = condition_fn()
+            if value:
+                return value
             time.sleep(interval)
         self.assert_true(False, "%s (timed out after %ds)" % (description, timeout))
         return None
@@ -464,6 +483,7 @@ class TestRunner:
         self.test_2_start()
         self.test_3_verify_state()
         self.test_4_exercise_controls()
+        self.test_widgets()
         self.test_hover()
         self.test_5_save_load()
 
@@ -479,183 +499,171 @@ class TestRunner:
             for err in self.errors:
                 print("  - %s" % err)
 
-    # 9.3 Step 1: Discover capabilities
+    # 9.3 Step 1: Discover what the project declares
     def test_1_discover(self):
-        print("[1. Discover capabilities]")
-        resp = self.client.call("get_project_info")
-        result = resp.get("result", {})
-        self.capabilities = result.get("capabilities", [])
-
-        self.assert_true(
-            "get_state" in self.capabilities,
-            "get_state capability"
-        )
-        self.assert_true(
-            "quit" in self.capabilities,
-            "quit capability"
-        )
-        self.assert_true(
-            len(self.capabilities) > 2,
-            "Multiple capabilities (%d found)" % len(self.capabilities)
-        )
-
-        project_name = result.get("project_name", "")
-        project_version = result.get("project_version", "")
-        print("  Project: %s %s" % (project_name, project_version))
-        print("  Capabilities: %s" % ", ".join(sorted(self.capabilities)))
+        print("[1. Discover]")
+        info = self.client.result("get_project_info")
+        self.capabilities = info.get("capabilities", [])
+        self.assert_true(info.get("assistant_protocol_version", 0) >= 4,
+                         "protocol version %s >= 4" % info.get("assistant_protocol_version"))
+        for method in ("describe", "get", "call", "quit"):
+            self.assert_true(self.has_cap(method), "%s capability" % method)
+        self.refresh()
+        objects = self.described["objects"]
+        print("  Project: %s %s" % (info.get("project_name", ""), info.get("project_version", "")))
+        print("  Objects: %s" % ", ".join(sorted(objects)))
+        self.assert_true("IVStateManager" in objects, "describe: IVStateManager declared")
 
     # 9.3 Step 2: Start simulation
     def test_2_start(self):
         print("[2. Start simulation]")
-        resp = self.client.call("get_project_info")
-        result = resp.get("result", {})
-        wait_for_start = result.get("wait_for_start", False)
-        started = result.get("started", False)
-
-        if wait_for_start and not started:
-            self.assert_true(self.has_cap("start_game"), "start_game capability available")
-            print("  Calling start_game...")
-            self.client.call("start_game")
-
-        state = self.poll_state(
-            lambda s: s.get("started", False),
-            "Simulator started",
-        )
-        if state:
-            self.assert_true(True, "Simulator started")
+        state = self.client.get("IVStateManager", "started")
+        settings = self.client.get("IVCoreSettings", "wait_for_start")
+        if settings.get("wait_for_start") and not state.get("started"):
+            self.poll(lambda: self.has_member("IVStateManager", "start") or self.refresh(),
+                      "IVStateManager.start available", timeout=120)
+            print("  Calling IVStateManager.start...")
+            self.client.invoke("IVStateManager", "start")
+        ready = self.poll(lambda: self.client.result("get_project_info").get("ready"),
+                          "Simulator started and ready", timeout=240)
+        if ready:
+            self.assert_true(True, "Simulator started and ready")
+        self.refresh() # bodies and their widgets exist now
 
     # 9.3 Step 3: Verify state
     def test_3_verify_state(self):
         print("[3. Verify state]")
+        state = self.client.get("IVStateManager", "started", "running")
+        self.assert_true(state.get("started"), "IVStateManager.started")
 
-        # get_state
-        resp = self.client.call("get_state")
-        result = resp.get("result", {})
-        self.assert_true(result.get("started", False), "get_state: started")
-        # is_saving/is_loading are only present when IVSave plugin is enabled.
-        self.assert_eq(result.get("is_saving", False), False, "get_state: not saving")
-        self.assert_eq(result.get("is_loading", False), False, "get_state: not loading")
+        date = self.client.get("IVGlobal", "date")["date"]
+        self.assert_gt(date[0], 0, "IVGlobal.date: year")
+        self.assert_true(1 <= date[1] <= 12, "IVGlobal.date: month = %d (1-12)" % date[1])
+        self.assert_true(1 <= date[2] <= 31, "IVGlobal.date: day = %d (1-31)" % date[2])
 
-        # get_time
-        if self.has_cap("get_time"):
-            resp = self.client.call("get_time")
-            result = resp.get("result", {})
-            date = result.get("date", [0, 0, 0])
-            self.assert_gt(date[0], 0, "get_time: year")
-            self.assert_true(1 <= date[1] <= 12, "get_time: month = %d (1-12)" % date[1])
-            self.assert_true(1 <= date[2] <= 31, "get_time: day = %d (1-31)" % date[2])
+        if "SelectionManager" in self.described["objects"]:
+            selection = self.client.get("SelectionManager", "selection")["selection"]
+            self.assert_true(selection is not None, "SelectionManager.selection: %s" % selection)
         else:
-            self.skip("get_time not available")
+            self.skip("no SelectionManager")
 
-        # get_selection
-        if self.has_cap("get_selection"):
-            resp = self.client.call("get_selection")
-            result = resp.get("result", {})
-            self.assert_true("error" not in resp, "get_selection: no error")
+        if "IVCamera" in self.described["objects"]:
+            target = self.client.get("IVCamera", "target")["target"]
+            self.assert_true(target is not None, "IVCamera.target: %s" % target)
         else:
-            self.skip("get_selection not available")
-
-        # get_camera
-        if self.has_cap("get_camera"):
-            resp = self.client.call("get_camera")
-            result = resp.get("result", {})
-            self.assert_true(len(result.get("target", "")) > 0, "get_camera: has target")
-        else:
-            self.skip("get_camera not available")
+            self.skip("no IVCamera")
 
     # 9.3 Step 4: Exercise controls
     def test_4_exercise_controls(self):
         print("[4. Exercise controls]")
 
-        # list_bodies — planets
-        if self.has_cap("list_bodies"):
-            resp = self.client.call("list_bodies", {"filter": "planets"})
-            result = resp.get("result", {})
-            bodies = result.get("bodies", [])
-            self.assert_gt(len(bodies), 0, "list_bodies: planets found (%d)" % len(bodies))
-            has_earth = "PLANET_EARTH" in bodies
-            has_mars = "PLANET_MARS" in bodies
-            self.assert_true(has_earth, "list_bodies: PLANET_EARTH")
-            self.assert_true(has_mars, "list_bodies: PLANET_MARS")
+        bodies = [instance["name"] for instance in self.instances("IVBody")]
+        if bodies:
+            planet_flag = self.described["enums"].get("IVBody.BodyFlags", {}).get(
+                "BODYFLAGS_PLANET", 0)
+            responses = self.client.batch([("get", {"object": {"class": "IVBody", "name": name},
+                                                    "properties": "flags"}) for name in bodies])
+            planets = [name for name, response in zip(bodies, responses)
+                       if AssistantClient.check(response)["flags"] & planet_flag]
+            self.assert_gt(len(planets), 0, "IVBody planets found (%d)" % len(planets))
+            self.assert_true("PLANET_EARTH" in planets, "IVBody: PLANET_EARTH is a planet")
+            self.assert_true("PLANET_MARS" in planets, "IVBody: PLANET_MARS is a planet")
         else:
-            self.skip("list_bodies not available")
+            self.skip("no IVBody instances")
 
-        # select_body
-        if self.has_cap("select_body"):
-            resp = self.client.call("select_body", {"name": "PLANET_MARS"})
-            result = resp.get("result", {})
-            self.assert_true(result.get("ok", False), "select_body: PLANET_MARS")
-            # Verify selection changed
-            if self.has_cap("get_selection"):
-                resp = self.client.call("get_selection")
-                result = resp.get("result", {})
-                self.assert_eq(result.get("name", ""), "PLANET_MARS",
-                               "get_selection: now PLANET_MARS")
+        if self.has_member("SelectionManager", "select_by_name"):
+            found = self.client.invoke("SelectionManager", "select_by_name", name="PLANET_MARS")
+            self.assert_true(found, "SelectionManager.select_by_name: PLANET_MARS")
+            self.assert_eq(self.client.invoke("SelectionManager", "get_name"), "PLANET_MARS",
+                           "SelectionManager.get_name")
         else:
-            self.skip("select_body not available")
+            self.skip("SelectionManager.select_by_name not declared")
 
-        # move_camera
-        if self.has_cap("move_camera"):
-            resp = self.client.call("move_camera",
-                                    {"target": "PLANET_EARTH", "instant": True})
-            result = resp.get("result", {})
-            self.assert_true(result.get("ok", False), "move_camera: to PLANET_EARTH")
-            # Camera target should update
-            if self.has_cap("get_camera"):
-                resp = self.client.call("get_camera")
-                result = resp.get("result", {})
-                self.assert_eq(result.get("target", ""), "PLANET_EARTH",
-                               "get_camera: target is PLANET_EARTH")
+        if self.has_member("CameraHandler", "move_to_by_name"):
+            self.client.invoke("CameraHandler", "move_to_by_name", selection_name="PLANET_EARTH",
+                               is_instant_move=True)
+            self.assert_eq(self.client.get("IVCamera", "target")["target"],
+                           {"class": "IVBody", "name": "PLANET_EARTH"}, "IVCamera.target")
         else:
-            self.skip("move_camera not available")
+            self.skip("CameraHandler.move_to_by_name not declared")
 
-        # set_pause
-        if self.has_cap("set_pause"):
-            # Pause
-            resp = self.client.call("set_pause", {"paused": True})
-            result = resp.get("result", {})
-            self.assert_true(result.get("ok", False), "set_pause: paused")
-            resp = self.client.call("get_state")
-            self.assert_eq(resp.get("result", {}).get("paused_by_user", False), True,
-                           "get_state: paused_by_user after pause")
-            # Unpause
-            resp = self.client.call("set_pause", {"paused": False})
-            result = resp.get("result", {})
-            self.assert_true(result.get("ok", False), "set_pause: unpaused")
-            resp = self.client.call("get_state")
-            self.assert_eq(resp.get("result", {}).get("paused_by_user", False), False,
-                           "get_state: not paused_by_user after unpause")
+        if self.has_member("IVStateManager", "set_user_paused"):
+            # One round trip: pause, read, unpause, read.
+            responses = self.client.batch([
+                ("call", {"object": "IVStateManager", "method": "set_user_paused",
+                          "args": {"pause": True}}),
+                ("get", {"object": "IVStateManager", "properties": "paused_by_user"}),
+                ("call", {"object": "IVStateManager", "method": "set_user_paused",
+                          "args": {"pause": False}}),
+                ("get", {"object": "IVStateManager", "properties": "paused_by_user"}),
+            ])
+            results = [AssistantClient.check(response) for response in responses]
+            self.assert_eq(results[1]["paused_by_user"], True, "paused_by_user after pause")
+            self.assert_eq(results[3]["paused_by_user"], False, "paused_by_user after unpause")
         else:
-            self.skip("set_pause not available")
+            self.skip("IVStateManager.set_user_paused not available")
 
-        # set_speed
-        if self.has_cap("set_speed"):
-            resp = self.client.call("set_speed", {"index": 3})
-            result = resp.get("result", {})
-            self.assert_true(result.get("ok", False), "set_speed: index 3")
-            self.assert_eq(result.get("speed_index", -1), 3,
-                           "set_speed: confirmed index 3")
-            # Reset to default
-            self.client.call("set_speed", {"index": 0})
+        if self.has_member("SpeedManager", "change_speed"):
+            self.client.invoke("SpeedManager", "change_speed", new_speed_index=3)
+            self.assert_eq(self.client.get("SpeedManager", "speed_index")["speed_index"], 3,
+                           "SpeedManager.speed_index")
+            self.client.invoke("SpeedManager", "change_speed", new_speed_index=0)
         else:
-            self.skip("set_speed not available")
+            self.skip("SpeedManager.change_speed not available")
 
-    # Optional: mouse-hover identification (capability `mouse_hover`)
+    # The user surface: operate a widget the way a user does.
+    def test_widgets(self):
+        print("[Widgets]")
+        widgets = self.client.result("list_widgets", {"visible_only": True})["widgets"]
+        self.assert_gt(len(widgets), 0, "visible widgets (%d)" % len(widgets))
+        pause = next((w for w in widgets if w["class"] == "IVPauseButton" and w["enabled"]), None)
+        if pause:
+            for pressed in (True, False):
+                result = self.client.result("operate_widget",
+                                            {"widget": pause["widget"], "pressed": pressed})
+                self.assert_eq(result["state"].get("pressed"), pressed, "IVPauseButton pressed")
+                self.assert_eq(self.client.get("IVStateManager", "paused_by_user")[
+                    "paused_by_user"], pressed, "paused_by_user follows IVPauseButton")
+        else:
+            self.skip("no enabled IVPauseButton")
+        speed = next((w for w in widgets if w["class"] == "IVSpeedButtons"), None)
+        if speed:
+            result = self.client.result("operate_widget", {"widget": speed["widget"], "value": 2})
+            self.assert_eq(result["state"].get("value"), 2, "IVSpeedButtons value")
+            self.client.result("operate_widget", {"widget": speed["widget"], "value": 0})
+        else:
+            self.skip("no IVSpeedButtons")
+
+    # Optional: mouse-hover identification
     def test_hover(self):
         print("[Mouse hover identification]")
         if self.skip_hover:
             self.skip("hover test skipped (--skip-hover)")
             return
-        if not self.has_cap("mouse_target_id"):
-            self.skip("mouse_target_id capability not available")
+        if "IVMouseTargetLabel" not in self.described["objects"]:
+            self.skip("no IVMouseTargetLabel")
             return
-        if not self.has_cap("move_camera"):
-            self.skip("move_camera unavailable; cannot stage hover test")
+        if not self.has_member("CameraHandler", "move_to_by_name"):
+            self.skip("CameraHandler.move_to_by_name not declared; cannot stage hover test")
             return
 
-        self._hover_body()
-        self._hover_orbit_line()
-        self._hover_asteroid_point()
+        # A GUI panel over the projected point would take the mouse from the world.
+        hide_gui = self.has_member("IVShowHideUI", "show_hide_gui")
+        if hide_gui:
+            self.client.invoke("IVShowHideUI", "show_hide_gui", is_toggle=False, is_show=False)
+        try:
+            self._hover_body()
+            self._hover_orbit_line()
+            self._hover_asteroid_point()
+        finally:
+            if hide_gui:
+                self.client.invoke("IVShowHideUI", "show_hide_gui", is_toggle=False,
+                                   is_show=True)
+
+    def _hover_text(self, position):
+        self.client.result("warp_mouse", {"position": position})
+        time.sleep(0.4)
+        return self.client.get("IVMouseTargetLabel", "text")["text"]
 
     def _hover_body(self):
         # Body picking via WorldController. Move the camera to a body so it
@@ -666,20 +674,13 @@ class TestRunner:
         print("  -- Body picking")
         candidates = ["STAR_SUN", "PLANET_MARS", "PLANET_JUPITER", "PLANET_EARTH"]
         for body in candidates:
-            self.client.call("move_camera", {"target": body, "instant": True})
+            self.client.invoke("CameraHandler", "move_to_by_name", selection_name=body,
+                               is_instant_move=True)
             time.sleep(0.6)
-            resp = self.client.call("project_to_screen", {"body": body})
-            if "error" in resp:
+            resp = self.client.call("project_to_screen", {"node": {"class": "IVBody", "name": body}})
+            if "error" in resp or not resp["result"].get("on_screen", False):
                 continue
-            result = resp.get("result", {})
-            if not result.get("on_screen", False):
-                continue
-            pos = result.get("position", [0.0, 0.0])
-            px, py = float(pos[0]), float(pos[1])
-
-            self.client.call("warp_mouse", {"position": [px, py]})
-            time.sleep(0.4)
-            text = self.client.call("get_hover_target").get("result", {}).get("text", "")
+            text = self._hover_text(resp["result"]["position"])
             bare = body.split("_", 1)[1].lower() if "_" in body else body.lower()
             if bare in text.lower():
                 self.assert_true(
@@ -696,13 +697,30 @@ class TestRunner:
         # of view_position is in target perspective-radii; for the Sun
         # (~700,000 km mean radius) z=1000 places the camera ~4.7 AU from Sun,
         # which frames Mercury → Jupiter and the main asteroid belt.
-        self.client.call("select_body", {"name": "STAR_SUN"})
-        self.client.call("move_camera", {
-            "target": "STAR_SUN",
-            "view_position": [0.0, 0.5, 1000.0],
-            "instant": True,
-        })
+        self.client.invoke("SelectionManager", "select_by_name", name="STAR_SUN")
+        self.client.invoke("CameraHandler", "move_to_by_name", selection_name="STAR_SUN",
+                           view_position=[0.0, 0.5, 1000.0], is_instant_move=True)
         time.sleep(1.0)
+
+    def _offset_at_time(self, body, at_time):
+        """How far `body` will have moved at `at_time`: its position summed up the
+        parent chain then, less now."""
+        chain = []
+        address = {"class": "IVBody", "name": body}
+        while address:
+            chain.append(address)
+            address = self.client.get(address, "parent")["parent"]
+        requests = []
+        for link in chain:
+            requests.append(("call", {"object": link, "method": "get_position_vector",
+                                      "args": {"time": at_time}}))
+            requests.append(("call", {"object": link, "method": "get_position_vector"}))
+        results = [AssistantClient.check(response) for response in self.client.batch(requests)]
+        offset = [0.0, 0.0, 0.0]
+        for then, now in zip(results[0::2], results[1::2]):
+            for i in range(3):
+                offset[i] += then[i] - now[i]
+        return offset
 
     def _hover_orbit_line(self):
         # Project a body at a future time (quarter-orbit ahead) and hover
@@ -710,8 +728,8 @@ class TestRunner:
         # identify it is the orbit-line shader (today: IVFragmentIdentifier).
         # Expect "(orbit)" in the label — distinguishes from body picking.
         print("  -- Body-orbit line")
-        if not self.has_cap("get_body_orbit") or not self.has_cap("get_time"):
-            self.skip("orbit hover: get_body_orbit or get_time unavailable")
+        if not self.has_member("BodyHUDsState", "set_all_orbits_visibility"):
+            self.skip("orbit hover: BodyHUDsState.set_all_orbits_visibility not declared")
             return
 
         self._set_wide_solar_view()
@@ -720,44 +738,28 @@ class TestRunner:
         # reflect the previous user session (e.g. planetarium's view cacher
         # restores it). Force-enable all body orbits so the orbit-line shader
         # is drawing, then restore exact prior state in the finally clause.
-        # No has_cap gate — same reason as the asteroid hover path.
-        previous_orbit_flags = None
-        vis_resp = self.client.call(
-            "set_all_body_orbits_visibility", {"visible": True})
-        if "result" in vis_resp:
-            previous_orbit_flags = int(
-                vis_resp["result"].get("previous_flags", 0))
-            # Let visibility_changed propagate to orbit_visual.gd and the GPU
-            # render a frame with orbit shaders active.
-            time.sleep(0.5)
+        previous_flags = self.client.get("BodyHUDsState", "orbit_visible_flags")[
+            "orbit_visible_flags"]
+        self.client.invoke("BodyHUDsState", "set_all_orbits_visibility", is_show=True)
+        # Let visibility_changed propagate to orbit_visual.gd and the GPU
+        # render a frame with orbit shaders active.
+        time.sleep(0.5)
 
         try:
-            time_resp = self.client.call("get_time")
-            current_time = float(time_resp.get("result", {}).get("time", 0.0))
-
+            current_time = self.client.get("Timekeeper", "time")["time"]
             candidates = ["PLANET_EARTH", "PLANET_MARS", "PLANET_JUPITER", "PLANET_VENUS"]
             for body in candidates:
-                orbit_resp = self.client.call("get_body_orbit", {"name": body})
-                period = float(orbit_resp.get("result", {}).get("period", 0.0))
-                if period <= 0.0:
+                period = self.client.invoke({"class": "IVBody", "name": body, "via": "orbit"},
+                                            "get_period")
+                if not isinstance(period, (int, float)) or period <= 0.0:
                     continue
-
                 for fraction in (0.25, 0.125, 0.0625, 0.5):
-                    future_time = current_time + period * fraction
-                    proj_resp = self.client.call(
-                        "project_to_screen", {"body": body, "time": future_time})
-                    if "error" in proj_resp:
+                    offset = self._offset_at_time(body, current_time + period * fraction)
+                    resp = self.client.call("project_to_screen", {
+                        "node": {"class": "IVBody", "name": body}, "offset": offset})
+                    if "error" in resp or not resp["result"].get("on_screen", False):
                         continue
-                    result = proj_resp.get("result", {})
-                    if not result.get("on_screen", False):
-                        continue
-                    pos = result.get("position", [0.0, 0.0])
-                    px, py = float(pos[0]), float(pos[1])
-
-                    self.client.call("warp_mouse", {"position": [px, py]})
-                    time.sleep(0.4)
-                    hover_resp = self.client.call("get_hover_target")
-                    text = hover_resp.get("result", {}).get("text", "")
+                    text = self._hover_text(resp["result"]["position"])
                     if "orbit" in text.lower():
                         self.assert_true(
                             True,
@@ -768,94 +770,80 @@ class TestRunner:
 
             self.skip("orbit hover: no candidate body's orbit line resolved an identification")
         finally:
-            if previous_orbit_flags is not None:
-                self.client.call(
-                    "set_body_orbit_visible_flags",
-                    {"flags": previous_orbit_flags})
+            self.client.invoke("BodyHUDsState", "set_orbit_visible_flags",
+                               orbit_visible_flags_=previous_flags)
 
     def _hover_asteroid_point(self):
-        # List SBGs, project an asteroid in the first non-Trojan group, hover.
-        # Identifies an asteroid POINT (FragmentIdentifier sbg-point branch);
-        # text is the asteroid's stored name.
+        # Project an asteroid in a non-Trojan small-body group, hover. Identifies
+        # an asteroid POINT (FragmentIdentifier sbg-point branch); text is the
+        # asteroid's stored name.
         print("  -- Asteroid point")
-        if not self.has_cap("small_bodies_id"):
-            self.skip("asteroid hover: small_bodies_id capability not available")
+        groups = [instance["name"] for instance in self.instances("IVSmallBodiesGroup")]
+        if not groups or not self.has_member("SBGHUDsState", "change_symbols_visibility"):
+            self.skip("asteroid hover: no small-body groups or SBGHUDsState")
             return
-        resp = self.client.call("list_small_body_groups")
-        if "error" in resp:
-            self.skip("asteroid hover: list_small_body_groups failed")
-            return
-        groups = resp.get("result", {}).get("groups", [])
-        non_lp_groups = [g for g in groups
-                         if g.get("lp_integer", -1) == -1 and g.get("count", 0) > 0]
+        responses = self.client.batch([("get", {
+            "object": {"class": "IVSmallBodiesGroup", "name": name},
+            "properties": ["sbg_alias", "lp_integer"]}) for name in groups])
+        non_lp_groups = []
+        for name, response in zip(groups, responses):
+            properties = AssistantClient.check(response)
+            if properties["lp_integer"] == -1:
+                non_lp_groups.append((name, properties["sbg_alias"]))
         if not non_lp_groups:
-            self.skip("asteroid hover: no non-Trojan SBG with elements available")
+            self.skip("asteroid hover: no non-Trojan small-body group")
             return
 
         self._set_wide_solar_view()
 
-        # SBG points default to hidden (IVSBGHUDsState.points_visibilities is
+        # SBG points default to hidden (IVSBGHUDsState.symbols_visibilities is
         # empty unless the project preinitializer seeds it), so without this
         # toggle the FragmentIdentifier reads black pixels and never resolves.
-        # Note: we don't has_cap-gate this — capabilities was read pre-start, so
-        # runtime-gated methods aren't in the snapshot. Same pattern as the
-        # list_small_body_groups call above.
         visibility_changes = []
-        for group in non_lp_groups:
-            vis_resp = self.client.call(
-                "set_small_body_points_visibility",
-                {"group": group["name"], "visible": True})
-            if "result" in vis_resp:
-                visibility_changes.append((
-                    group["name"],
-                    bool(vis_resp["result"].get("previous", False))))
-        if visibility_changes:
-            # Let the SBG points visuals respond to points_visibility_changed
-            # and the GPU draw a frame with the points present.
-            time.sleep(0.5)
+        for _, alias in non_lp_groups:
+            previous = self.client.invoke("SBGHUDsState", "is_symbols_visible", group=alias)
+            self.client.invoke("SBGHUDsState", "change_symbols_visibility", group=alias,
+                               is_show=True)
+            visibility_changes.append((alias, previous))
+        # Let the SBG points visuals respond and the GPU draw a frame with the points.
+        time.sleep(0.5)
 
         try:
             # Bound the warp budget so the test cannot run for minutes if the
-            # FragmentIdentifier fails to resolve (e.g. visibility toggle was
-            # gated out, or points are too small at this view to land in the
-            # 9-pixel sample). 30 attempts × ~0.4s ≈ 12s worst case.
+            # FragmentIdentifier fails to resolve (e.g. points are too small at
+            # this view to land in the 9-pixel sample). 30 attempts × ~0.4s ≈ 12s.
             per_group_cap = 10
             total_cap = 30
             total_attempts = 0
-            for group in non_lp_groups:
-                group_name = group["name"]
-                max_count = min(200, group["count"])
+            for name, _ in non_lp_groups:
+                group = {"class": "IVSmallBodiesGroup", "name": name}
+                primary = self.client.invoke(group, "get_primary")
+                count = min(200, self.client.invoke(group, "get_number"))
                 group_attempts = 0
-                for index in range(max_count):
+                for index in range(count):
                     if group_attempts >= per_group_cap or total_attempts >= total_cap:
                         break
-                    proj_resp = self.client.call(
-                        "project_small_body_to_screen",
-                        {"group": group_name, "index": index})
-                    if "error" in proj_resp:
+                    position, expected_name = [AssistantClient.check(response) for response in
+                                               self.client.batch([
+                        ("call", {"object": group, "method": "get_member_position",
+                                  "args": {"index": index}}),
+                        ("call", {"object": group, "method": "get_member_name",
+                                  "args": {"index": index}}),
+                    ])]
+                    resp = self.client.call("project_to_screen",
+                                            {"node": primary, "offset": position})
+                    if "error" in resp or not resp["result"].get("on_screen", False):
                         continue
-                    result = proj_resp.get("result", {})
-                    if not result.get("on_screen", False):
-                        continue
-                    pos = result.get("position", [0.0, 0.0])
-                    px, py = float(pos[0]), float(pos[1])
-                    expected_name = result.get("name", "")
-                    if not expected_name:
-                        continue
-
-                    self.client.call("warp_mouse", {"position": [px, py]})
-                    time.sleep(0.4)
-                    hover_resp = self.client.call("get_hover_target")
-                    text = hover_resp.get("result", {}).get("text", "")
+                    text = self._hover_text(resp["result"]["position"])
                     group_attempts += 1
                     total_attempts += 1
                     # POINT hover yields name; ORBIT hover yields name + " (orbit)".
                     # Either contains the asteroid's stored name as a substring.
-                    if expected_name in text:
+                    if expected_name and expected_name in text:
                         self.assert_true(
                             True,
                             "asteroid hover: text %r contains %r (group=%s, index=%d)"
-                            % (text, expected_name, group_name, index),
+                            % (text, expected_name, name, index),
                         )
                         return
                 if total_attempts >= total_cap:
@@ -865,12 +853,12 @@ class TestRunner:
                 "asteroid hover: %d on-screen attempt(s) across %d group(s) did not resolve"
                 % (total_attempts, len(non_lp_groups)))
         finally:
-            for group_name, prev in visibility_changes:
-                self.client.call(
-                    "set_small_body_points_visibility",
-                    {"group": group_name, "visible": prev})
+            for alias, previous in visibility_changes:
+                self.client.invoke("SBGHUDsState", "change_symbols_visibility", group=alias,
+                                   is_show=previous)
 
-    # 9.3 Step 5: Save/load cycle
+    # 9.3 Step 5: Save/load cycle. The Save plugin declares no members yet, so this
+    # uses the deprecated save methods (SPECIFICATION.md section 4.12).
     def test_5_save_load(self):
         print("[5. Save/load cycle]")
 
@@ -883,17 +871,17 @@ class TestRunner:
             self.skip("save_game/load_game not in capabilities")
             return
 
+        def get_state():
+            return self.client.call("get_state").get("result", {})
+
         # Save
         resp = self.client.call("save_game", {"type": "quicksave"})
         result = resp.get("result", {})
         self.assert_true(result.get("ok", False), "save_game: quicksave initiated")
 
         # Poll until save completes
-        state = self.poll_state(
-            lambda s: not s.get("is_saving", True),
-            "Save completed",
-            timeout=30,
-        )
+        state = self.poll(lambda: (lambda s: s if not s.get("is_saving", True) else None)(
+            get_state()), "Save completed", timeout=30)
         if not state:
             return
 
@@ -911,19 +899,16 @@ class TestRunner:
         self.assert_true(result.get("ok", False), "load_game: quickload initiated")
 
         # Poll until load completes and sim restarts
-        state = self.poll_state(
-            lambda s: not s.get("is_loading", True) and s.get("started", False),
-            "Load completed and simulator restarted",
-            timeout=30,
-        )
+        state = self.poll(lambda: (lambda s: s if not s.get("is_loading", True)
+                                   and s.get("started", False) else None)(get_state()),
+                          "Load completed and simulator restarted", timeout=30)
         if not state:
             return
 
         self.assert_true(True, "load_game: completed and restarted")
 
         # Verify state is sane after load
-        resp = self.client.call("get_state")
-        result = resp.get("result", {})
+        result = get_state()
         self.assert_true(result.get("started", False), "Post-load: started")
         self.assert_eq(result.get("is_saving", True), False, "Post-load: not saving")
         self.assert_eq(result.get("is_loading", True), False, "Post-load: not loading")

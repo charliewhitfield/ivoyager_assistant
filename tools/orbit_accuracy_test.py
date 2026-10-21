@@ -7,10 +7,11 @@ JPL Horizons API (EPHEM_TYPE=VECTORS, REF_PLANE=ECLIPTIC, REF_SYSTEM=J2000,
 position relative to parent body center, km) so the test runs offline and is
 reproducible.
 
-The simulator is queried via the Assistant TCP server's `get_body_position`
-with explicit `time` (TT J2000 seconds), which returns the parent-relative
-position in the J2000 ecliptic basis — directly comparable to the Horizons
-vectors after unit scaling.
+The simulator is queried through the Assistant TCP server, calling the
+declared IVBody.get_position_vector() with explicit `time` (TT J2000 seconds),
+which returns the parent-relative position in the J2000 ecliptic basis —
+directly comparable to the Horizons vectors once divided by the declared
+IVUnits.KM.
 
 Pass criterion is the 3D angular separation (parent-centered) between the sim
 and Horizons vectors. Mean-element models legitimately diverge from precise
@@ -27,8 +28,9 @@ Usage:
 import argparse
 import math
 import sys
+import time
 
-from assistant_test import DEFAULT_PORT, AssistantClient, GodotLauncher
+from assistant_test import DEFAULT_PORT, AssistantClient, AssistantError, GodotLauncher
 from godot_executable import find_godot_executable
 
 EPOCH_JD = 2451545.0  # J2000
@@ -147,23 +149,24 @@ def ecliptic_lon_lat_deg(v):
     return lon, lat
 
 
+def body_address(body_name):
+    return {"class": "IVBody", "name": body_name}
+
+
 def get_present_bodies(client):
-    """Return the set of body names the project actually loaded, or None if the
-    list_bodies capability is unavailable (then presence isn't gated)."""
-    response = client.call("list_bodies", {"filter": "all"})
-    if "error" in response:
-        return None
-    return set(response.get("result", {}).get("bodies", []))
+    """Return the set of body names the project actually loaded."""
+    instances = client.describe(widgets=False, actions=False)["classes"].get(
+        "IVBody", {}).get("instances", [])
+    return {instance["name"] for instance in instances}
 
 
 def get_orbit_class(client, body_name, cache):
-    """Report a body's orbit model class (e.g. 'IVRealPlanetOrbit'), cached.
-    Falls back to 'IVOrbit' if the field is absent (older plugin) so far-date
-    planet checks degrade to skipped rather than asserted."""
+    """Report a body's orbit model class (e.g. 'IVRealPlanetOrbit'), cached, from
+    the class its orbit value reports."""
     if body_name in cache:
         return cache[body_name]
-    response = client.call("get_body_orbit", {"name": body_name})
-    orbit_class = response.get("result", {}).get("orbit_class", "IVOrbit")
+    orbit = client.get(body_address(body_name), "orbit")["orbit"]
+    orbit_class = orbit.get("class", "IVOrbit") if orbit else "IVOrbit"
     cache[body_name] = orbit_class
     return orbit_class
 
@@ -172,6 +175,8 @@ def run_tests(client, body_filter=None):
     failures = []
     skips = []
     present_bodies = get_present_bodies(client)
+    # Sim units per km; the project's scale (IVUnits.METER) need not be 1.
+    km = client.get("IVUnits", "KM")["KM"]
     orbit_class_cache = {}
     print(f"\n{'body':14s} {'jd_tdb':>12s} {'angle':>8s} {'dlon':>8s} "
           f"{'r_ratio':>8s} {'tol':>5s}  result")
@@ -182,7 +187,7 @@ def run_tests(client, body_filter=None):
             continue
         # Skip bodies this project doesn't load (different/smaller body set) so
         # the runner stays useful across projects rather than reporting failures.
-        if present_bodies is not None and body_name not in present_bodies:
+        if body_name not in present_bodies:
             skips.append(f"{body_name}: not loaded in this project")
             print(f"{body_name:14s} {'(all dates)':>12s}  SKIP: body not loaded")
             continue
@@ -200,13 +205,13 @@ def run_tests(client, body_filter=None):
                     continue
 
             time_seconds = (jd_tdb - EPOCH_JD) * DAY_SECONDS
-            response = client.call("get_body_position",
-                                   {"name": body_name, "time": time_seconds})
-            if "error" in response:
-                failures.append(f"{body_name} @ {jd_tdb}: {response['error']}")
-                print(f"{body_name:14s} {jd_tdb:12.4f}  ERROR: {response['error']}")
+            try:
+                sim_vector = [component / km for component in client.invoke(
+                    body_address(body_name), "get_position_vector", time=time_seconds)]
+            except AssistantError as error:
+                failures.append(f"{body_name} @ {jd_tdb}: {error}")
+                print(f"{body_name:14s} {jd_tdb:12.4f}  ERROR: {error}")
                 continue
-            sim_vector = response["result"]["position"]
 
             angle = angle_between_deg(sim_vector, ref_vector)
             sim_lon, _sim_lat = ecliptic_lon_lat_deg(sim_vector)
@@ -261,14 +266,11 @@ def main():
         if launcher:
             launcher.check_instance(client)
 
-        # Sim-gated methods return error 4 until the readiness gate opens. Probe
-        # list_bodies (no specific body required) until it returns a result.
-        import time as time_module
-        for _ in range(60):
-            response = client.call("list_bodies", {"filter": "all"})
-            if "result" in response:
+        # Bodies exist once the simulator has started and the readiness gate opens.
+        for _ in range(240):
+            if client.result("get_project_info").get("ready"):
                 break
-            time_module.sleep(1.0)
+            time.sleep(1.0)
 
         failures, skips = run_tests(client, args.bodies)
         success = not failures
