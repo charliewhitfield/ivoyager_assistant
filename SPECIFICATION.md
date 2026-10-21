@@ -35,6 +35,7 @@ IVAssistantTestSuite (RefCounted base class; default suites and methods in §7.2
   ├─ StateQuerySuite: time, selection, camera and body queries
   ├─ ControlSuite: selection, pause, speed, time, camera, GUI, HUDs, actions
   ├─ ViewSuite: built-in and user-cached views
+  ├─ SettingsSuite: user settings
   ├─ CoreTestSuite: screenshot, save/load
   ├─ GuiInspectionSuite: find_nodes, inspect_node, read_node_text
   ├─ MouseTargetIdSuite: warp_mouse, project_to_screen, get_hover_target
@@ -45,7 +46,7 @@ IVAssistantTestSuite (RefCounted base class; default suites and methods in §7.2
 
 1. EditorPlugin registers `IVAssistantServer` as an autoload when the plugin is enabled
 2. On game start, `IVAssistantServer._ready()` reads config and command-line overrides (§7.3), checks `enabled`/`debug_only`, connects to `IVStateManager` signals
-3. On `core_initialized`: test suites load from the `[assistant_test_suites]` config section and their requirement tokens resolve (§7.5); the TCP server starts listening. Only built-in methods (`get_project_info`, `get_state`, `start_game`, `quit`) and test suite methods that don't require sim started (e.g. `get_save_status`) are available
+3. On `core_initialized`: test suites load from the `[assistant_test_suites]` config section and their requirement tokens resolve (§7.5); the TCP server starts listening. Only built-in methods (`get_project_info`, `get_state`, `start_game`, `quit`) and test suite methods that don't require sim started (e.g. `get_save_status`, `get_options`) are available
 4. On `simulator_started`: forwarded to all test suites so they can cache program references, and `widget.*` / `runtime.*` requirement tokens are re-evaluated. The readiness gate begins evaluating each frame.
 5. **Readiness gate opens** after the project-supplied `ready_predicate` (default trivially true) has returned `true` for `min_ready_delay_frames` consecutive frames (default 10). Sim-gated API methods become available only at this point. See §7.3 and §7.4.
 6. On `about_to_free_procedural_nodes`: forwarded to all test suites to clear references, sim-dependent methods return errors. The readiness gate re-arms (closes until the next `simulator_started` plus delay).
@@ -425,7 +426,46 @@ Hides or shows every 3D HUD at once, absolutely rather than by toggling: orbit l
 
 Any other HUD visibility change shows the HUDs again: the setters below, the GUI's HUD checkboxes, or a view whose `affects` includes `huds_visibility`. Such a view is also the way to put the visibility settings themselves back to a known state.
 
-The visibility settings persist across sessions, and a project may restore them at startup (the Planetarium's view cacher does), so a test can't assume the state it starts in. The methods below return the previous state so a caller can put it back.
+The visibility settings persist across sessions, and a project may restore them at startup (the Planetarium's view cacher does), so a test can't assume the state it starts in. `get_huds` reads them, and the setters below return the previous state so a caller can put it back.
+
+#### `get_huds`
+Reads every HUD's visibility setting, by body class and by small-body group, and whether `set_huds` has them all hidden. The body classes are those the GUI's HUD checkboxes set, named as `IVBody.BodyFlags` names them without the `BODYFLAGS_` prefix.
+
+**Params:** none
+
+**Result:**
+```json
+{
+  "huds_hidden": false,
+  "body_classes": {
+    "PLANET": {"names": true, "symbols": true, "orbits": true},
+    "ASTEROID": {"names": false, "symbols": false, "orbits": false}
+  },
+  "name_visible_flags": 8912,
+  "symbol_visible_flags": 8912,
+  "orbit_visible_flags": 8896,
+  "all_flags": 11984,
+  "small_body_groups": {
+    "SBG_NEAR_EARTH": {"alias": "NE", "symbols": false, "orbits": false}
+  }
+}
+```
+(abbreviated). The flags are `IVBody.BodyFlags` bitmasks, as `set_body_orbit_visible_flags` takes. A small-body group's `symbols` are its points. `small_body_groups` is present only when the project has small-body HUDs.
+
+#### `set_class_huds`
+Shows or hides one HUD for one or more body classes or small-body groups, as the GUI's HUD checkboxes do (`IVHUDsCheckBox`).
+
+**Params:**
+- `hud` (string, required) — `"names"`, `"symbols"` or `"orbits"`. Small-body groups have no names.
+- `body_classes` (string or array) — Body classes as `get_huds` names them, e.g. `"PLANET"`; the `BODYFLAGS_` prefix is optional.
+- `groups` (string or array) — Small-body groups by name or alias, e.g. `"SBG_JUPITER_L4_TROJANS"` or `"JT4"`.
+- `visible` (bool, required)
+
+Supply exactly one of `body_classes` and `groups`.
+
+**Result:** `{"ok": true, "hud": "names", "visible": false, "previous": {"PLANET": true, "DWARF_PLANET": true}, "huds_hidden": false}` — `previous` holds each class's or group's visibility before the call (groups by name), for putting it back.
+
+An unknown body class returns error code 2, an unknown group error code 3.
 
 #### `set_all_body_orbits_visibility`
 Show or hide every body's orbit line.
@@ -804,6 +844,50 @@ Apply one of the user's saved views, as the GUI's saved-view buttons do.
 
 An unknown view returns error code 2.
 
+### 4.11 User Settings
+
+User settings are `IVSettingsManager`'s: those the Options popup (`IVOptionsPopup`) shows, and any a project keeps out of it. They exist before the simulator starts, so these methods work from a splash screen too.
+
+#### `get_options`
+Reads every setting, or one.
+
+**Params:**
+- `setting` (string, optional) — A setting's key. Omit for all.
+
+**Result:**
+```json
+{
+  "settings": {
+    "atmosphere_quality": {"value": 1, "default": 1, "type": "int", "restart_pending": false,
+        "enumeration": ["ATMOSPHERE_NORMAL", "ATMOSPHERE_REDUCED", "ATMOSPHERE_MIN", "ATMOSPHERE_OFF"]},
+    "glow": {"value": true, "default": true, "type": "bool", "restart_pending": false}
+  },
+  "restart_pending": false,
+  "cache_current": true
+}
+```
+(abbreviated). With `setting`, the result is that one setting's entry, plus `"setting"`.
+
+- `type` is the Godot type of the setting's default, which a new value must match. A `Color` reads as `"#rrggbb"`, or `"#rrggbbaa"` when translucent.
+- `enumeration` names the values of a setting the Options popup offers as a dropdown, in order, so `value` indexes it. The names are untranslated text keys. Absent for other settings, and where the project has no Options popup.
+- `default` is this machine's: a project that sets `IVSettingsManager.graphics_target` fits its graphics defaults to the hardware.
+- `restart_pending` is true for a setting that takes effect only at startup and now differs from what the running session uses; at the top level, for any setting.
+- `cache_current` is false while a change has not been written to the settings file.
+
+#### `set_option`
+Changes a setting, as the Options popup does (`IVSettingsManager.change_setting`).
+
+**Params:**
+- `setting` (string, required)
+- `value` (required) — Of the setting's `type`. An integer setting with an `enumeration` also takes one of its names, and a `Color` takes an HTML color string.
+- `persist` (bool, optional, default false) — Also write the settings file, as the popup's Confirm button does.
+
+**Result:** `{"ok": true, "setting": "atmosphere_quality", "value": 2, "previous": 1, "restart_pending": true, "cache_current": false}` — `previous` is for putting it back.
+
+An unpersisted change lasts until quit, so a test run leaves the user's next session alone — unless something persists a setting first. The settings file is written whole, so `persist`, the popup's Confirm, and GUI controls that change a setting directly (the HUDs panel's size spinboxes) write every pending change along with their own. A setting that comes back `restart_pending` takes effect only at the next start, so it needs `persist`.
+
+An unknown setting, or a value that doesn't fit its type or enumeration, returns error code 2.
+
 ## 5. Core API Dependencies
 
 The AssistantServer reads from and writes to these core objects:
@@ -821,7 +905,9 @@ The AssistantServer reads from and writes to these core objects:
 | `CameraHandler` | Via `IVGlobal.program[&"CameraHandler"]` | Camera state and `move_to()` |
 | `IVViewManager` | Via `IVGlobal.program[&"ViewManager"]` | Table and cached views: `set_table_view()`, `set_view()` |
 | `IVBodyHUDsState` | Via `IVGlobal.program[&"BodyHUDsState"]` | Body HUD visibility (orbits, names, symbols) |
-| `IVSBGHUDsState` | Via `IVGlobal.program[&"SBGHUDsState"]` (optional) | Small-body group points visibility |
+| `IVSBGHUDsState` | Via `IVGlobal.program[&"SBGHUDsState"]` (optional) | Small-body group points and orbits visibility |
+| `IVSettingsManager` | Autoload singleton | User settings: `get_setting_keys()`, `get_setting()`, `get_default()`, `change_setting()`, restart and cache state |
+| `IVOptionsPopup` | Found anywhere in the tree (optional) | `option_enumerations`, to name a dropdown setting's values |
 | `IVInputMapManager` | Static `defaults` / `action_texts` | Action listing for `list_actions` |
 | `IVMouseTargetLabel` | Found under `IVGlobal.program[&"TopUI"]` | Read `text` / `visible` for hover-target identification (independent of the underlying identifier mechanism) |
 | `Camera3D` / `IVCamera` | Via `Viewport.get_camera_3d()` | `unproject_position()` for world-to-screen projection; `set_field_of_view()` / `set_focal_length()` |
@@ -870,8 +956,9 @@ The `[assistant_test_suites]` section registers `IVAssistantTestSuite` subclasse
 | Suite | Methods |
 |---|---|
 | `StateQuerySuite` | `get_time`, `get_selection`, `get_camera`, `list_bodies`, `get_body_info`, `get_body_position`, `get_body_orbit`, `get_body_distance`, `get_body_state_vectors` |
-| `ControlSuite` | `select_body`, `select_navigate`, `set_pause`, `set_speed`, `set_time`, `move_camera`, `set_camera_fov`, `show_hide_gui`, `list_actions`, `press_action`, `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_huds` |
+| `ControlSuite` | `select_body`, `select_navigate`, `set_pause`, `set_speed`, `set_time`, `move_camera`, `set_camera_fov`, `show_hide_gui`, `list_actions`, `press_action`, `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_huds`, `get_huds`, `set_class_huds` |
 | `ViewSuite` | `list_views`, `apply_view`, `list_cached_views`, `apply_cached_view` |
+| `SettingsSuite` | `get_options`, `set_option` |
 | `CoreTestSuite` | `screenshot`, `save_game`, `load_game`, `get_save_status` |
 | `GuiInspectionSuite` | `find_nodes`, `inspect_node`, `read_node_text` |
 | `MouseTargetIdSuite` | `warp_mouse`, `project_to_screen`, `get_hover_target` |
@@ -1083,7 +1170,7 @@ Assistant methods bind to the **same Core entry points the GUI widgets bind to, 
 Reaching below that surface is a deliberate, marked exception. There are two today:
 
 - `move_camera` bypasses the view layer and hand-supplies a perspective-distance `view_position` (documented as low-level in §4.3). Camera framing should normally go through the view methods (§4.10), which call `IVViewManager.set_table_view` — exactly what the GUI view buttons do.
-- The HUD visibility setters (`set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_small_body_points_visibility`) set visibility in bulk or by raw flags, which no GUI widget does: the HUD checkboxes set one body class or group at a time.
+- The HUD visibility setters (`set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_small_body_points_visibility`) set visibility in bulk, by raw flags or through a lower setter, which no GUI widget does. `set_class_huds` is the widget-level path.
 
 | Control group | GUI widget script | Core class.method |
 |---|---|---|
@@ -1095,7 +1182,9 @@ Reaching below that surface is a deliberate, marked exception. There are two tod
 | Camera zoom | `ui_widgets/focal_length_control.gd` | `IVCamera.set_focal_length` (and `set_field_of_view`) |
 | Camera (low-level) | — (no GUI widget hand-supplies a `view_position`) | `IVCameraHandler.move_to` / `move_to_by_name` — perspective-distance system; **below the view layer, a marked exception** |
 | Hide all HUDs | `ui_widgets/hide_huds_button.gd` (`IVHideHUDsButton`) | `IVBodyHUDsState.set_huds_hidden` |
-| HUD visibility settings | `ui_widgets/huds_checkbox.gd` (`IVBodyHUDsState.set_*_visibility`, `IVSBGHUDsState.set_visible_*_groups`) | `IVBodyHUDsState` `set_all_orbits_visibility` / `set_orbit_visible_flags`; `IVSBGHUDsState.change_symbols_visibility` — **beside the widget layer, a marked exception** |
+| HUD visibility by class | `ui_widgets/huds_checkbox.gd` (`IVHUDsCheckBox`) | `IVBodyHUDsState` `set_name_visibility` / `set_symbol_visibility` / `set_orbit_visibility`; `IVSBGHUDsState` `set_visible_symbols_groups` / `set_visible_orbits_groups` |
+| HUD visibility, bulk or raw | — (the checkboxes set one class or group) | `IVBodyHUDsState` `set_all_orbits_visibility` / `set_orbit_visible_flags`; `IVSBGHUDsState.change_symbols_visibility` — **beside the widget layer, a marked exception** |
+| User settings | `ui/options_popup.gd` (`IVOptionsPopup`) | `IVSettingsManager.change_setting`; `cache_now` on Confirm |
 
 New write-side Assistant methods should add a row here and bind at the widget level.
 

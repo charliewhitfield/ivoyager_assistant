@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.5.dev. The TCP server, modular test suite architecture, and the generic state / control / body / camera / view / time / selection / speed / HUD / save / load / GUI-inspection / mouse-target / screenshot / action-emulation APIs are all in place, plus a Python test runner that can run several instances at once. Remaining work centers on a settings API, generic widget actuation and accessibility.
+v0.0.5.dev. The TCP server, modular test suite architecture, and the generic state / control / body / camera / view / time / selection / speed / HUD / settings / save / load / GUI-inspection / mouse-target / screenshot / action-emulation APIs are all in place, plus a Python test runner that can run several instances at once. Remaining work centers on generic widget actuation and accessibility.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -20,28 +20,9 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
 - **Phase 3d — Mouse hover identification** (`MouseTargetIdSuite`, plus `SmallBodiesIdSuite` for asteroid points) — `warp_mouse`, `project_to_screen`, `get_hover_target`, `project_small_body_to_screen`. Positions are in window pixels, the same as a screenshot's. Lets tests verify that hovering at a given screen position identifies the expected element by reading `IVMouseTargetLabel.text`. The suite never references `IVFragmentIdentifier` directly, so it serves as a regression safety net for the upcoming replacement of that class with a more efficient identifier (e.g. Compositors-based) — tests written today should continue to pass after the swap, validating that the user-visible effect is preserved.
 
 - **Phase 3e — Views** (`ViewSuite`) — `list_views`, `apply_view`. Binds Tier-1 camera framing to `IVViewManager.set_table_view` — the same Core call the GUI's default `IVViewButton` makes — so an agent frames the camera the way a user clicks a view button, instead of hand-building a perspective-distance vector through `move_camera`. (`move_camera` has since gained a `tracking` parameter, and `set_camera_fov` sets zoom.) `list_views` decodes each table view's target, tracking mode, up-lock, framing vector, and affected state categories (`IVView` has no description field). `list_cached_views` / `apply_cached_view` later added the user's own saved views. Established the "Core surface classes / layering principle" (`SPECIFICATION.md` §10): Assistant methods bind to the same Core entry points GUI widgets do, at the same level; sub-surface access (e.g. `move_camera`) is the marked exception. Also corrected the `IVCamera` / `IVCameraHandler` / `IVViewManager.set_table_view` doc comments to state the perspective-distance contract in caller terms and point to views as the normal path.
-- **HUD visibility** (in `ControlSuite` and `SmallBodiesIdSuite`) — `set_huds` (hides or shows everything at once, as the GUI's hide-HUDs button does), `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_small_body_points_visibility`. The per-flag setters return the previous state so a test can restore it. Covers what Step 4.2 below planned, except a `get_huds` reader.
+- **HUD visibility** (in `ControlSuite` and `SmallBodiesIdSuite`) — `set_huds` (hides or shows everything at once, as the GUI's hide-HUDs button does), `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_small_body_points_visibility`. The per-flag setters return the previous state so a test can restore it.
 - **Parallel instances** — `--assistant-port` / `--assistant-instance` command-line arguments, `process_id` / `port` / `instance_id` in `get_project_info`, and `GodotLauncher` (`tools/assistant_test.py`) launching on a free port, tied to its script and held to one logical processor per core.
-
-## Next: Phase 4 — Settings & HUD typed API
-
-**Goal:** add typed, named accessors for user settings and HUD state, complementing the generic `find_nodes` / `inspect_node` introspection that already exists.
-
-`get_gui_state` from the original Phase 4 plan is **superseded** by the GUI inspection suite (`SPECIFICATION.md` §4.8) and is dropped. The remaining items:
-
-### Step 4.1: Settings
-
-- **`set_option`** — Change a user setting via `IVSettingsManager`.
-  - **Params:** `setting` (string, required), `value` (variant, required).
-  - **Result:** `{"ok": true, "setting": "...", "value": ...}`.
-- **`get_options`** — Read current settings as a dict (or read a single setting if `setting` param is supplied).
-
-### Step 4.2: HUD state
-
-- Setters are done (see Completed). Remaining: a `get_huds` reader for the current flags of both HUD systems, and setters for names and symbols by body class, which today only a view or `set_huds` (all at once) reaches.
-- The per-flag setters sit beside the GUI's HUD checkboxes rather than on them (`SPECIFICATION.md` §10); setters by body class would bind where the checkboxes do.
-
-These are *typed* APIs — they expose state by named flag, not by GUI text. The generic `find_nodes` / `read_node_text` route remains the right tool for asserting that GUI text *renders* correctly; this Phase 4 is about programmatic state control.
+- **Phase 4 — Settings & HUD typed API** — `SettingsSuite` (`get_options`, `set_option`) binds where the Options popup does and names a dropdown setting's values from the popup's own enumerations; changes stay unpersisted unless asked. `get_huds` and `set_class_huds` (in `ControlSuite`) read and set HUD visibility by body class and small-body group, `set_class_huds` binding where the HUD checkboxes do. Core gained `IVSettingsManager.get_setting_keys()` for it. These expose state by named flag, not by GUI text; `find_nodes` / `read_node_text` remain the tools for asserting that GUI text renders. `get_gui_state` from the original Phase 4 plan was dropped, superseded by the GUI inspection suite.
 
 ## Next: Suite B — Generic widget actuation (deferred)
 
@@ -61,7 +42,7 @@ The write-side sibling of `GuiInspectionSuite` (`SPECIFICATION.md` §4.8 read-si
 - Resolve the target by node path (reuse `GuiInspectionSuite`'s resolution) and validate the resolved class is in-vocabulary before acting.
 - Echo the resulting state in the result (e.g. `{"ok": true, "pressed": true}`) so the client can confirm without a follow-up `inspect_node`.
 
-Does **not** replace the typed Phase 4 Settings/HUD API — typed accessors stay the right tool for named state; Suite B is for arbitrary GUI controls with no typed Core accessor. Deferred behind Phase 4 because typed accessors cover the highest-value controls first; Suite B generalizes the remainder.
+Does **not** replace the typed settings and HUD methods (Phase 4) — typed accessors stay the right tool for named state; Suite B is for arbitrary GUI controls with no typed Core accessor, and generalizes the remainder.
 
 ## Next: Phase 5 — Accessibility
 

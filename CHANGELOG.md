@@ -9,6 +9,10 @@ File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Under development using Godot 4.7.2.
 
+### Added
+* New SettingsSuite with `get_options` and `set_option`, which read and change user settings as the Options popup does, naming a dropdown setting's values; a change is not written to the settings file unless `persist` is given. See SPECIFICATION.md §4.11.
+* Methods `get_huds`, which reads every HUD's visibility by body class and small-body group, and `set_class_huds`, which sets one HUD for chosen classes or groups as the GUI's HUD checkboxes do, in the control suite.
+
 ### Changed
 * [API breaking] `set_huds` hides and shows the HUDs as the GUI's hide-HUDs button does (`IVBodyHUDsState.set_huds_hidden`), so `{"visible": true}` restores what was on screen rather than each system's defaults, hidden HUDs no longer carry into the user's next session, and the result adds `huds_hidden`. To set HUD visibility to a known state, apply a view that sets it.
 * `GodotLauncher` in `tools/assistant_test.py` holds each launched Godot to one logical processor of each core on Windows, which can otherwise put the busy threads of instances run at once two to a core; `one_per_core=False` leaves it unpinned. See SPECIFICATION.md §7.3.
