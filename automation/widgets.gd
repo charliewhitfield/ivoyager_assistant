@@ -141,12 +141,16 @@ func _operate_composite(widget: Control, params: Dictionary) -> Variant:
 	var arg_infos: Array = info.get("args", [{}])
 	var arg_info: Dictionary = arg_infos[0] if arg_infos else {}
 	automation.converter.error = ""
-	var value: Variant = automation.converter.from_json(params.value, arg_info, "value")
+	var value: Variant = automation.converter.from_json(params["value"], arg_info, "value")
 	if automation.converter.error:
 		var message := automation.converter.error
 		automation.converter.error = ""
 		return _param_error(message)
-	widget.call(VALUE_SETTER, value)
+	var accepted: Variant = widget.call(VALUE_SETTER, value)
+	if accepted == false:
+		return {"_error": {"code": ERR_NOT_ALLOWED,
+				"message": "The widget refused value %s (see its options)" % JSON.stringify(
+				params["value"])}}
 	return null
 
 
@@ -277,7 +281,7 @@ func _press(button: BaseButton) -> void:
 # *****************************************************************************
 # description
 
-func _describe_widget(widget: Control, openers: Dictionary[Control, Control]) -> Dictionary:
+func _describe_widget(widget: Control, openers: Dictionary[Node, Control]) -> Dictionary:
 	var entry := {
 		"widget": _get_address(widget),
 		"class": String(_get_automation().get_object_class_name(widget)),
@@ -285,9 +289,10 @@ func _describe_widget(widget: Control, openers: Dictionary[Control, Control]) ->
 		"name": _get_widget_name(widget),
 	}
 	var description := widget.accessibility_description
-	if !description and widget.tooltip_text and widget.tooltip_text != entry.name:
-		description = widget.tooltip_text
-	if description:
+	if !description:
+		description = widget.atr(widget.tooltip_text)
+	var widget_name: String = entry.name
+	if description and !widget_name.ends_with(description):
 		entry["description"] = description
 	entry["state"] = _get_state(widget)
 	entry["enabled"] = _is_enabled(widget)
@@ -350,32 +355,54 @@ func _get_state(widget: Control) -> Dictionary:
 	return {}
 
 
-# A widget names itself, else its label (a HUDs grid row and column), else its text.
+# Translated, as a user sees it: what labels the widget (a HUDs row), then what
+# the widget names itself, else its text unless that is a symbol ("||", "+"),
+# else its tooltip.
 func _get_widget_name(widget: Control) -> String:
-	if widget.accessibility_name:
-		return widget.accessibility_name
 	var label_texts := PackedStringArray()
 	for path in widget.accessibility_labeled_by_nodes:
 		var label := widget.get_node_or_null(path)
 		if label is Control:
 			var label_control: Control = label
-			var label_name := label_control.accessibility_name
-			if !label_name:
-				label_name = str(label_control.get(&"text")) if &"text" in label_control else ""
+			var label_name := _get_text(label_control)
 			if label_name:
 				label_texts.append(label_name)
+	var own_name := widget.accessibility_name # translated by its getter
+	if !own_name:
+		own_name = _get_text(widget)
+	if !own_name or !_has_letters(own_name):
+		var tooltip := widget.atr(widget.tooltip_text)
+		if tooltip:
+			own_name = tooltip
 	if label_texts:
-		return " ".join(label_texts)
-	var text: Variant = widget.get(&"text") if &"text" in widget else null
-	if typeof(text) == TYPE_STRING and text:
-		return text
-	if widget is FoldableContainer:
-		var foldable: FoldableContainer = widget
-		if foldable.title:
-			return foldable.title
-	if widget.tooltip_text:
-		return widget.tooltip_text
-	return String(widget.name)
+		return "%s: %s" % [" ".join(label_texts), own_name] if own_name else " ".join(label_texts)
+	return own_name if own_name else String(widget.name)
+
+
+func _get_text(control: Control) -> String:
+	if control.accessibility_name:
+		return control.accessibility_name
+	if control is FoldableContainer:
+		var foldable: FoldableContainer = control
+		return control.atr(foldable.title)
+	if control is RichTextLabel:
+		var rich_text_label: RichTextLabel = control
+		return rich_text_label.get_parsed_text()
+	if &"text" in control:
+		var text: Variant = control.get(&"text")
+		if typeof(text) == TYPE_STRING:
+			var text_string: String = text
+			return control.atr(text_string)
+	return ""
+
+
+func _has_letters(text: String) -> bool:
+	for i in text.length():
+		var code := text.unicode_at(i)
+		if (code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122) \
+				or code > 127:
+			return true
+	return false
 
 
 func _get_family(widget: Control) -> String:
@@ -421,8 +448,9 @@ func _is_enabled(widget: Control) -> bool:
 # *****************************************************************************
 # identity
 
-# Widgets in tree order. A composite is one unit, so its children aren't widgets;
-# internal children (a SpinBox's LineEdit) never are.
+# Widgets in tree order. A composite is one unit, so the controls of its own
+# scene aren't widgets, though children a project adds to it are; internal
+# children (a SpinBox's LineEdit) never are.
 func _collect_widgets(root: Node) -> Array[Control]:
 	var widgets: Array[Control] = []
 	_collect_widgets_recursive(root, widgets)
@@ -434,37 +462,39 @@ func _collect_widgets(root: Node) -> Array[Control]:
 	return widgets
 
 
-func _collect_widgets_recursive(node: Node, widgets: Array[Control]) -> void:
-	if node is Control:
+func _collect_widgets_recursive(node: Node, widgets: Array[Control], composite: Control = null
+		) -> void:
+	if node is Control and (!composite or node.owner != composite):
 		var control: Control = node
 		var family := _get_family(control)
-		if family:
+		# A control neither mouse nor keyboard reaches is inert (a layout spacer).
+		var is_inert := (control.mouse_filter == Control.MOUSE_FILTER_IGNORE
+				and control.focus_mode == Control.FOCUS_NONE and family != FAMILY_COMPOSITE)
+		if family and !is_inert:
 			widgets.append(control)
 			if family == FAMILY_COMPOSITE:
-				return
+				composite = control
 	for child in node.get_children():
-		_collect_widgets_recursive(child, widgets)
+		_collect_widgets_recursive(child, widgets, composite)
 
 
-# The control whose accessibility_controls_nodes reveals each controlled node.
-func _get_openers(widgets: Array[Control]) -> Dictionary[Control, Control]:
-	var openers: Dictionary[Control, Control] = {}
+# The widget whose accessibility_controls_nodes reveals each controlled node, a
+# panel or a popup Window.
+func _get_openers(widgets: Array[Control]) -> Dictionary[Node, Control]:
+	var openers: Dictionary[Node, Control] = {}
 	for widget in widgets:
 		for path in widget.accessibility_controls_nodes:
 			var controlled := widget.get_node_or_null(path)
-			if controlled is Control:
-				var controlled_control: Control = controlled
-				openers[controlled_control] = widget
+			if controlled:
+				openers[controlled] = widget
 	return openers
 
 
-func _find_opener(widget: Control, openers: Dictionary[Control, Control]) -> Control:
+func _find_opener(widget: Control, openers: Dictionary[Node, Control]) -> Control:
 	var node: Node = widget
 	while node:
-		if node is Control:
-			var control: Control = node
-			if openers.has(control):
-				return openers[control]
+		if openers.has(node):
+			return openers[node]
 		node = node.get_parent()
 	return null
 
@@ -510,13 +540,15 @@ func _resolve_widget(address: Variant, widgets: Array[Control]) -> Variant:
 	for widget in widgets:
 		if !automation.is_instance_of_class(widget, class_name_):
 			continue
+		var declaration := automation.get_declaration_of(widget)
 		var is_match := true
 		for field: Variant in fields:
 			if field == "class":
 				continue
 			var property := StringName(str(field))
+			var info: Dictionary = declaration.property_infos.get(property, {}) if declaration 					else {}
 			if !(property in widget) or !automation.json_equal(
-					automation.converter.to_json(widget.get(property)), fields[field]):
+					automation.converter.to_json(widget.get(property), info), fields[field]):
 				is_match = false
 				break
 		if is_match:

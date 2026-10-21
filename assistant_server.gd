@@ -444,12 +444,13 @@ func _get_project_info() -> Dictionary:
 	return result
 
 
-# A client's whole context: declared objects, plus the user surface of widgets
-# and input actions unless asked to leave them out.
+# A client's whole context: declared objects, plus the user surface (the
+# widgets a user can see now, and input actions) unless asked to leave them out.
 func _describe(params: Dictionary) -> Dictionary:
 	var result := _automation.describe(params)
 	if params.get("widgets", true):
-		result["widgets"] = _widgets.list_widgets({}).get("widgets", [])
+		var widgets: Dictionary = _widgets.list_widgets({"visible_only": true})
+		result["widgets"] = widgets.get("widgets", [])
 	if params.get("actions", true):
 		var actions: Dictionary = _godot_tools.dispatch("list_actions", {})
 		result["actions"] = actions.get("actions", {})
