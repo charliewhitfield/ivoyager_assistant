@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.1.dev. The TCP server, modular test suite architecture, and the generic state / control / body / camera / view / time / selection / speed / save / load / GUI-inspection / screenshot / action-emulation APIs are all in place, plus a Python test runner. Remaining work centers on settings/HUD typed APIs and accessibility.
+v0.0.5.dev. The TCP server, modular test suite architecture, and the generic state / control / body / camera / view / time / selection / speed / HUD / save / load / GUI-inspection / mouse-target / screenshot / action-emulation APIs are all in place, plus a Python test runner that can run several instances at once. Remaining work centers on a settings API, generic widget actuation and accessibility.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -17,9 +17,11 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
 - **Save/load** (in `CoreTestSuite`) — `save_game`, `load_game`, `get_save_status`. Available only when `ivoyager_save` is present.
 - **Readiness gate** — `ready_predicate` + `min_ready_delay_frames` + `IVAssistantServer.is_ready()`. Lets projects with deferred main-thread initialization gate save/load and similar operations until state has settled.
 - **Test runner** — `tools/assistant_test.py` implements the SPECIFICATION.md §9.3 sequence; capability-aware, skips unsupported features.
-- **Phase 3d — Mouse hover identification** (`MouseHoverSuite`) — `warp_mouse`, `project_to_screen`, `get_hover_target`. Lets tests verify that hovering at a given screen position identifies the expected element by reading `IVMouseTargetLabel.text`. The suite never references `IVFragmentIdentifier` directly, so it serves as a regression safety net for the upcoming replacement of that class with a more efficient identifier (e.g. Compositors-based) — tests written today should continue to pass after the swap, validating that the user-visible effect is preserved.
+- **Phase 3d — Mouse hover identification** (`MouseTargetIdSuite`, plus `SmallBodiesIdSuite` for asteroid points) — `warp_mouse`, `project_to_screen`, `get_hover_target`, `project_small_body_to_screen`. Positions are in window pixels, the same as a screenshot's. Lets tests verify that hovering at a given screen position identifies the expected element by reading `IVMouseTargetLabel.text`. The suite never references `IVFragmentIdentifier` directly, so it serves as a regression safety net for the upcoming replacement of that class with a more efficient identifier (e.g. Compositors-based) — tests written today should continue to pass after the swap, validating that the user-visible effect is preserved.
 
-- **Phase 3e — Views** (`ViewSuite`) — `list_views`, `apply_view`. Binds Tier-1 camera framing to `IVViewManager.set_table_view` — the same Core call the GUI's default `IVViewButton` makes — so an agent frames the camera the way a user clicks a view button, instead of hand-building a perspective-distance vector through `move_camera`. `list_views` decodes each table view's target, tracking mode, up-lock, framing vector, and affected state categories (`IVView` has no description field). Scope is table views only; user/cached views are deferred to "Suite B". Established the "Core surface classes / layering principle" (`SPECIFICATION.md` §10): Assistant methods bind to the same Core entry points GUI widgets do, at the same level; sub-surface access (e.g. `move_camera`) is the marked exception. Also corrected the `IVCamera` / `IVCameraHandler` / `IVViewManager.set_table_view` doc comments to state the perspective-distance contract in caller terms and point to views as the normal path.
+- **Phase 3e — Views** (`ViewSuite`) — `list_views`, `apply_view`. Binds Tier-1 camera framing to `IVViewManager.set_table_view` — the same Core call the GUI's default `IVViewButton` makes — so an agent frames the camera the way a user clicks a view button, instead of hand-building a perspective-distance vector through `move_camera`. (`move_camera` has since gained a `tracking` parameter, and `set_camera_fov` sets zoom.) `list_views` decodes each table view's target, tracking mode, up-lock, framing vector, and affected state categories (`IVView` has no description field). `list_cached_views` / `apply_cached_view` later added the user's own saved views. Established the "Core surface classes / layering principle" (`SPECIFICATION.md` §10): Assistant methods bind to the same Core entry points GUI widgets do, at the same level; sub-surface access (e.g. `move_camera`) is the marked exception. Also corrected the `IVCamera` / `IVCameraHandler` / `IVViewManager.set_table_view` doc comments to state the perspective-distance contract in caller terms and point to views as the normal path.
+- **HUD visibility** (in `ControlSuite` and `SmallBodiesIdSuite`) — `set_huds` (hides or shows everything at once, as the GUI's hide-HUDs button does), `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_small_body_points_visibility`. The per-flag setters return the previous state so a test can restore it. Covers what Step 4.2 below planned, except a `get_huds` reader.
+- **Parallel instances** — `--assistant-port` / `--assistant-instance` command-line arguments, `process_id` / `port` / `instance_id` in `get_project_info`, and `GodotLauncher` (`tools/assistant_test.py`) launching on a free port, tied to its script and held to one logical processor per core.
 
 ## Next: Phase 4 — Settings & HUD typed API
 
@@ -34,10 +36,10 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
   - **Result:** `{"ok": true, "setting": "...", "value": ...}`.
 - **`get_options`** — Read current settings as a dict (or read a single setting if `setting` param is supplied).
 
-### Step 4.2: HUD toggles
+### Step 4.2: HUD state
 
-- Toggle body labels, orbit lines, and asteroid visibility via `BodyHUDsState` / `SBGHUDsState` flags.
-- Likely shape: a single `set_huds` method that takes a dict of flag → bool, plus a `get_huds` reader. Final shape TBD when implementing.
+- Setters are done (see Completed). Remaining: a `get_huds` reader for the current flags of both HUD systems, and setters for names and symbols by body class, which today only a view or `set_huds` (all at once) reaches.
+- The per-flag setters sit beside the GUI's HUD checkboxes rather than on them (`SPECIFICATION.md` §10); setters by body class would bind where the checkboxes do.
 
 These are *typed* APIs — they expose state by named flag, not by GUI text. The generic `find_nodes` / `read_node_text` route remains the right tool for asserting that GUI text *renders* correctly; this Phase 4 is about programmatic state control.
 

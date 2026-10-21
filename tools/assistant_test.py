@@ -9,6 +9,8 @@ when a project lacks specific features.
 Usage:
     python assistant_test.py                  # game already running
     python assistant_test.py --launch         # start Godot automatically
+    python assistant_test.py --launch --godot PATH --project DIR
+                                              # a specific build, or another project
     python assistant_test.py --skip-save      # skip save/load cycle
     python assistant_test.py --skip-hover     # skip mouse-hover identification test
     python assistant_test.py --host HOST      # custom host (default: 127.0.0.1)
@@ -25,6 +27,8 @@ import sys
 import threading
 import time
 import uuid
+
+from godot_executable import find_godot_executable
 
 
 DEFAULT_PORT = 29071
@@ -897,8 +901,9 @@ def main():
                         help="With --launch: pass --headless to Godot (no rendering;"
                              " skips the mouse-hover test)")
     parser.add_argument("--godot", default=None,
-                        help="Path to Godot executable")
-    parser.add_argument("--project", default=None,
+                        help="Path to Godot console executable (default: the newest build"
+                             " of the project's major beside the project)")
+    parser.add_argument("--project", default=".",
                         help="Path to project directory")
     parser.add_argument("--skip-save", action="store_true",
                         help="Skip save/load cycle")
@@ -908,12 +913,14 @@ def main():
 
     launcher = None
     if args.launch:
-        godot = args.godot or "../Godot_v4.6.2-stable_win64_console.exe"
-        project = args.project or "."
+        godot = args.godot or find_godot_executable(args.project, on_message=print)
+        if not godot:
+            print("No Godot console executable of the project's major; use --godot PATH")
+            sys.exit(2)
         extra = ["--headless"] if args.headless else []
-        launcher = GodotLauncher(godot, project, extra_args=extra, port=args.port or 0)
+        launcher = GodotLauncher(godot, args.project, extra_args=extra, port=args.port or 0)
         print("Launching Godot: %s %s --path %s (port %d)"
-              % (godot, " ".join(extra), project, launcher.port))
+              % (godot, " ".join(extra), args.project, launcher.port))
         launcher.start()
     port = launcher.port if launcher else args.port or DEFAULT_PORT
 

@@ -482,28 +482,22 @@ func _set_body_orbit_visible_flags(params: Dictionary) -> Variant:
 	}
 
 
-# Sets every 3D HUD overlay at once, absolutely rather than by toggling: orbit lines,
-# names and symbols, plus the small-body point groups when that system is present. An
-# evaluation screenshot needs a frame with nothing drawn over the subject, and a hotkey
-# toggle cannot promise one - its result depends on the state it found. Returns the
-# resulting flags so the caller can confirm rather than assume.
+# Hides or shows every 3D HUD at once, absolutely rather than by toggling, through the GUI's
+# hide-HUDs path. An evaluation screenshot needs a frame with nothing drawn over the
+# subject, and a hotkey toggle cannot promise one - its result depends on the state it
+# found. Hiding this way leaves the visibility flags alone and is not persisted, so a test
+# run can't carry hidden HUDs into the user's next session.
 func _set_huds(params: Dictionary) -> Variant:
 	var visible_var: Variant = params.get("visible")
 	if typeof(visible_var) != TYPE_BOOL:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "Missing or invalid 'visible' parameter (must be bool)"}}
 	var visible: bool = visible_var
-	if visible:
-		_body_huds_state.set_default_visibilities()
-		if _sbg_huds_state:
-			_sbg_huds_state.set_default_visibilities()
-	else:
-		_body_huds_state.hide_all()
-		if _sbg_huds_state:
-			_sbg_huds_state.hide_all()
+	_body_huds_state.set_huds_hidden(!visible)
 	return {
 		"ok": true,
 		"visible": visible,
+		"huds_hidden": _body_huds_state.huds_hidden,
 		"orbit_visible_flags": _body_huds_state.orbit_visible_flags,
 		"name_visible_flags": _body_huds_state.name_visible_flags,
 		"symbol_visible_flags": _body_huds_state.symbol_visible_flags,

@@ -10,7 +10,12 @@ File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Under development using Godot 4.7.2.
 
 ### Changed
+* [API breaking] `set_huds` hides and shows the HUDs as the GUI's hide-HUDs button does (`IVBodyHUDsState.set_huds_hidden`), so `{"visible": true}` restores what was on screen rather than each system's defaults, hidden HUDs no longer carry into the user's next session, and the result adds `huds_hidden`. To set HUD visibility to a known state, apply a view that sets it.
 * `GodotLauncher` in `tools/assistant_test.py` holds each launched Godot to one logical processor of each core on Windows, which can otherwise put the busy threads of instances run at once two to a core; `one_per_core=False` leaves it unpinned. See SPECIFICATION.md §7.3.
+* SPECIFICATION.md, CODING_PLAN.md and README.md are brought up to date with the code: methods they omitted (`set_camera_fov`, the cached-view, HUD-visibility and small-body methods) are documented, and stale suite names, result fields and §10's list of layering exceptions are corrected.
+
+### Fixed
+* `tools/assistant_test.py --launch` ran a hard-coded Godot executable unless given `--godot`; it now runs the newest build of the project's Godot major, chosen by new `tools/godot_executable.py`, which every launching script shares and which refuses rather than open the project with another major.
 
 
 ## [v0.0.4] - 2026-10-15
@@ -29,6 +34,7 @@ Released using Godot 4.7.2. This release coincides with Core plugin release v0.2
 * Command-line arguments `--assistant-port` and `--assistant-instance` (after `--`) override the configured port and tag the process, so one machine can run several instances at once; `get_project_info` reports `process_id`, `port` and `instance_id`. `GodotLauncher` in `tools/assistant_test.py` uses them: `port=0` launches on a free port, `check_instance()` verifies a client reached its own instance, and the launched Godot dies with its script on Windows. See SPECIFICATION.md §7.3.
 * `--headless` option for `tools/assistant_test.py`, which skips the mouse-hover test.
 * `move_camera` takes a `tracking` parameter (`"ground"`, `"orbit"` or `"ecliptic"`), which decides what frame its `view_position` longitude and latitude are measured in; omitted, the camera's current mode is left alone. Without it an agent could only pose in whatever frame the session happened to be in — and the default is not body-relative, so "put the camera 20 degrees above the equator" was not expressible at all.
+* Method `set_camera_fov` in the control suite, which zooms the current camera by field of view or focal length.
 * Method `set_huds` in the control suite, which sets orbit lines, names, symbols and the small-body point groups at once and absolutely. The `toggle_*` actions could not give an agent a clean frame to judge a render in: each is a toggle whose result depends on the state the session started in, so a cached view that already hides the HUDs has them *shown* by `press_action toggle_orbits`. `screenshot`'s `hide_gui` was never enough either — it hides the 2D GUI and leaves every 3D overlay drawing over the subject. The resulting flags come back in the result so a caller can confirm rather than assume.
 * Methods `list_cached_views` and `apply_cached_view` in the view suite, so an agent can reproduce a staging the user set up and saved by hand rather than hunting for it by trial and error. `apply_cached_view` takes the view's `name` and its `collection`; `list_cached_views` reports both, alongside the same decoded fields `list_views` gives for the built-in views.
 
@@ -44,7 +50,7 @@ Released using Godot 4.7.1. This release coincides with Core plugin release v0.2
 * Various updates for Core plugin v0.2.
 
 
-## v0.0.1 - 2025-06-29
+## v0.0.1 - 2026-06-29
 
 Released using Godot 4.7. This release coincides with other ivoyager plugin releases at v0.1.2.
 

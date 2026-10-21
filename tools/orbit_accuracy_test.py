@@ -26,11 +26,10 @@ Usage:
 
 import argparse
 import math
-import os
-import re
 import sys
 
 from assistant_test import DEFAULT_PORT, AssistantClient, GodotLauncher
+from godot_executable import find_godot_executable
 
 EPOCH_JD = 2451545.0  # J2000
 DAY_SECONDS = 86400.0
@@ -129,46 +128,6 @@ ANGLE_TOLERANCE_DEG = {
 DEFAULT_ANGLE_TOLERANCE_DEG = 3.0
 
 RADIUS_RATIO_TOLERANCE = 0.10  # |sim|/|ref| within +/-10%
-
-
-def find_godot_executable(project_dir):
-    """Newest Godot console exe in the project's parent dir matching the
-    major version pinned by project.godot config/features."""
-    config_path = os.path.join(project_dir, "project.godot")
-    major = None
-    try:
-        with open(config_path, encoding="utf-8") as config_file:
-            match = re.search(r'config/features=PackedStringArray\("(\d+\.\d+)"',
-                              config_file.read())
-            if match:
-                major = match.group(1)
-    except OSError:
-        pass
-
-    parent_dir = os.path.dirname(os.path.abspath(project_dir))
-    candidates = []
-    for filename in os.listdir(parent_dir):
-        match = re.match(r"Godot_v(\d+\.\d+(?:\.\d+)?)-?(\w*)_win64_console\.exe",
-                         filename)
-        if not match:
-            continue
-        version, stage = match.group(1), match.group(2)
-        if major and not version.startswith(major):
-            continue
-        stage_rank = {"dev": 0, "beta": 1, "rc": 2, "stable": 3}
-        stage_match = re.match(r"(dev|beta|rc|stable)(\d*)", stage)
-        if stage_match:
-            rank = stage_rank[stage_match.group(1)]
-            iteration = int(stage_match.group(2) or 0)
-        else:
-            rank, iteration = 3, 0
-        version_key = tuple(int(p) for p in version.split("."))
-        candidates.append((version_key, rank, iteration,
-                           os.path.join(parent_dir, filename)))
-    if not candidates:
-        return None
-    candidates.sort()
-    return candidates[-1][3]
 
 
 def angle_between_deg(a, b):
@@ -285,9 +244,9 @@ def main():
 
     launcher = None
     if args.launch:
-        godot = args.godot or find_godot_executable(args.project)
+        godot = args.godot or find_godot_executable(args.project, on_message=print)
         if not godot:
-            print("No Godot console executable found; use --godot PATH")
+            print("No Godot console executable of the project's major; use --godot PATH")
             sys.exit(2)
         print(f"Launching: {godot} --path {args.project}")
         launcher = GodotLauncher(godot, args.project, port=args.port or 0)

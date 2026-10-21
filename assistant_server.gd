@@ -350,7 +350,7 @@ func _get_project_info() -> Dictionary:
 	var project_version: String = ProjectSettings.get_setting("application/config/version", "")
 
 	# Capabilities = union of (built-in method names) + (active suite method
-	# names) + (suite-supplied feature flags, e.g. "mouse_hover"). Active here
+	# names) + (suite-supplied feature flags, e.g. "mouse_target_id"). Active here
 	# means "currently passes its requirement gating" — gated-out methods are
 	# excluded and reported separately under "gated_out".
 	var capability_set: Dictionary = {}

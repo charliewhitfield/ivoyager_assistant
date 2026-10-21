@@ -58,7 +58,7 @@ func get_method_names() -> Array[String]:
 ## Return capability strings for [code]get_project_info[/code]. Most suites can
 ## leave this empty: the server already advertises every active (non-gated)
 ## method name in [code]capabilities[/code]. Override only to add feature-group
-## identifiers (e.g. [code]"mouse_hover"[/code]) that aren't method names.
+## identifiers (e.g. [code]"mouse_target_id"[/code]) that aren't method names.
 func get_capabilities() -> Array[String]:
 	return []
 
