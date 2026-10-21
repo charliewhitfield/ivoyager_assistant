@@ -1,4 +1,4 @@
-# core_test_suite.gd
+# save_suite.gd
 # This file is part of I, Voyager
 # https://ivoyager.dev
 # *****************************************************************************
@@ -19,7 +19,11 @@
 # *****************************************************************************
 extends IVAssistantTestSuite
 
-## Screenshot, save/load methods for [IVAssistantServer].
+## Save/load methods for [IVAssistantServer], for projects with the Save plugin.
+##
+## Duck-typed against the [code]IVSave[/code] autoload, and not applicable
+## without it. These retire once the Save plugin declares its own automation
+## members (SPECIFICATION.md §11).
 
 var _save_singleton: Node # IVSave, if present (duck-typed)
 
@@ -29,29 +33,20 @@ func _init_test_suite(server: Node) -> void:
 	_save_singleton = server.get_node_or_null(^"/root/IVSave")
 
 
+func is_applicable() -> bool:
+	return _save_singleton != null
+
+
 func requires_sim_started() -> bool:
 	return false
 
 
 func get_method_names() -> Array[String]:
-	return ["screenshot", "save_game", "load_game", "get_save_status"]
-
-
-func get_method_requirements() -> Dictionary:
-	return {
-		"save_game": ["autoload.IVSave"],
-		"load_game": ["autoload.IVSave"],
-		"get_save_status": ["autoload.IVSave"],
-	}
+	return ["save_game", "load_game", "get_save_status"]
 
 
 func dispatch(method: String, params: Dictionary) -> Variant:
 	match method:
-		"screenshot":
-			if !IVStateManager.started:
-				return {"_error": {"code": ERR_NOT_STARTED,
-						"message": "Simulator not started"}}
-			return _screenshot(params)
 		"save_game":
 			@warning_ignore("unsafe_method_access")
 			if !_server.is_ready():
@@ -68,38 +63,6 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _get_save_status()
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Unknown method: %s" % method}}
-
-
-func _screenshot(params: Dictionary) -> Dictionary:
-	var path_var: Variant = params.get("path")
-	if typeof(path_var) != TYPE_STRING or path_var == "":
-		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "Missing or invalid 'path' parameter"}}
-	var path: String = path_var
-
-	var hide_gui := false
-	var hide_var: Variant = params.get("hide_gui")
-	if hide_var != null:
-		if typeof(hide_var) != TYPE_BOOL:
-			return {"_error": {"code": ERR_INVALID_PARAMS,
-					"message": "'hide_gui' must be a boolean"}}
-		var hide_bool: bool = hide_var
-		hide_gui = hide_bool
-
-	if hide_gui:
-		IVGlobal.show_hide_gui_requested.emit(false, false)
-		RenderingServer.force_draw(true)
-
-	var image := _server.get_viewport().get_texture().get_image()
-	var err := image.save_png(path)
-
-	if hide_gui:
-		IVGlobal.show_hide_gui_requested.emit(false, true)
-
-	if err != OK:
-		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "Failed to save screenshot: %s" % error_string(err)}}
-	return {"ok": true, "path": path, "size": [image.get_width(), image.get_height()]}
 
 
 func _save_game(params: Dictionary) -> Dictionary:

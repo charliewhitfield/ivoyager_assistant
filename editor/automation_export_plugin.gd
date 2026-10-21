@@ -1,0 +1,73 @@
+# automation_export_plugin.gd
+# This file is part of I, Voyager
+# https://ivoyager.dev
+# *****************************************************************************
+# Copyright 2019-2026 Charlie Whitfield
+# I, Voyager is a registered trademark of Charlie Whitfield in the US
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *****************************************************************************
+@tool
+class_name IVAssistantExportPlugin
+extends EditorExportPlugin
+
+## Adds the doc comments of every declaring script to an export.
+##
+## An export ships scripts without comments, so the descriptions
+## [code]describe[/code] gives would be lost. This parses the scripts that
+## declare automation members, and the scripts they extend, into
+## [constant IVAssistantDocs.DIGEST_PATH]. Exports in which the server can't run
+## (see [code]enabled[/code] and [code]debug_only[/code] in
+## [code]ivoyager_assistant.cfg[/code]) get no digest.
+
+
+func _get_name() -> String:
+	return "IVAssistantAutomationDocs"
+
+
+func _export_begin(_features: PackedStringArray, is_debug: bool, _path: String, _flags: int
+		) -> void:
+	var config := IVAssistantPluginUtils.get_ivoyager_config(
+			"res://addons/ivoyager_assistant/ivoyager_assistant.cfg")
+	var enabled: bool = config.get_value("assistant", "enabled", true)
+	var debug_only: bool = config.get_value("assistant", "debug_only", true)
+	if !enabled or (debug_only and !is_debug):
+		return
+	var tree: SceneTree = Engine.get_main_loop()
+	var automation := IVAssistantAutomation.new(tree)
+	var paths: Dictionary[String, bool] = {}
+	for path in _find_scripts("res://"):
+		var script: Script = load(path)
+		if !script or !automation.script_participates(script):
+			continue
+		while script:
+			if script.resource_path.ends_with(".gd"):
+				paths[script.resource_path] = true
+			script = script.get_base_script()
+	var digest := IVAssistantDocs.build_digest(PackedStringArray(paths.keys()))
+	add_file(IVAssistantDocs.DIGEST_PATH, JSON.stringify(digest).to_utf8_buffer(), false)
+	print("IVAssistantExportPlugin: added doc comments of %d scripts" % paths.size())
+
+
+func _find_scripts(dir_path: String) -> PackedStringArray:
+	var paths := PackedStringArray()
+	if FileAccess.file_exists(dir_path.path_join(".gdignore")):
+		return paths
+	for file_name in DirAccess.get_files_at(dir_path):
+		if file_name.get_extension() == "gd":
+			paths.append(dir_path.path_join(file_name))
+	for subdir in DirAccess.get_directories_at(dir_path):
+		if subdir.begins_with("."):
+			continue
+		paths.append_array(_find_scripts(dir_path.path_join(subdir)))
+	return paths

@@ -305,6 +305,14 @@ class GodotLauncher:
 # TCP Client
 # =============================================================================
 
+class AssistantError(RuntimeError):
+    """An error response; `code` is one of SPECIFICATION.md section 3.3."""
+
+    def __init__(self, code, message):
+        super().__init__("[%s] %s" % (code, message))
+        self.code = code
+
+
 class AssistantClient:
     """TCP client for the ivoyager_assistant JSON-RPC server."""
 
@@ -337,13 +345,50 @@ class AssistantClient:
             self._sock = None
 
     def call(self, method, params=None):
+        """Sends one request; returns the whole response, "result" or "error"."""
+        self._sock.sendall((json.dumps(self._make_request(method, params)) + "\n").encode("utf-8"))
+        return self._recv_response()
+
+    def batch(self, requests):
+        """Sends [(method, params), ...] as one JSON-RPC batch, executed in order in
+        one frame; returns the responses in order."""
+        batch = [self._make_request(method, params) for method, params in requests]
+        self._sock.sendall((json.dumps(batch) + "\n").encode("utf-8"))
+        return self._recv_response()
+
+    def describe(self, **params):
+        """Every declared object, class, member, widget and action
+        (SPECIFICATION.md section 4.2)."""
+        return self.result("describe", params)
+
+    def get(self, address, *properties):
+        """Declared properties of the object at `address` (all if none named)."""
+        params = {"object": address}
+        if properties:
+            params["properties"] = list(properties)
+        return self.result("get", params)
+
+    def invoke(self, address, method, **args):
+        """Calls a declared method with named arguments; returns its result."""
+        return self.result("call", {"object": address, "method": method, "args": args})
+
+    def result(self, method, params=None):
+        """Sends one request; returns its result or raises AssistantError."""
+        return self.check(self.call(method, params))
+
+    @staticmethod
+    def check(response):
+        """The result of one response, or AssistantError for an error response."""
+        if "error" in response:
+            raise AssistantError(response["error"].get("code"), response["error"].get("message"))
+        return response.get("result")
+
+    def _make_request(self, method, params):
         self._request_id += 1
         request = {"id": self._request_id, "method": method}
         if params:
             request["params"] = params
-        line = json.dumps(request) + "\n"
-        self._sock.sendall(line.encode("utf-8"))
-        return self._recv_response()
+        return request
 
     def _recv_response(self):
         while True:

@@ -22,48 +22,31 @@ extends Node
 ## Singleton [IVAssistantServer] is TCP server providing a JSON-RPC-style
 ## interface for AI testing and accessibility.
 ##
-## API methods are provided by [IVAssistantTestSuite] instances registered via
-## the [code][assistant_test_suites][/code] config section. See SPECIFICATION.md
-## for protocol and configuration details.
+## The server knows Godot, not the project. A project's classes declare what a
+## client may read and call ([IVAssistantAutomation]); Godot-level tools and
+## widget operation are built in; project-specific helpers come from
+## [IVAssistantTestSuite] instances registered in the
+## [code][assistant_test_suites][/code] config section. See SPECIFICATION.md for
+## protocol and configuration details.
 
 # Error codes
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2
-const ERR_BODY_NOT_FOUND := 3
+const ERR_NOT_FOUND := 3
 const ERR_NOT_STARTED := 4
 const ERR_NOT_ALLOWED := 5
 
-## Manifest schema version reported in [code]get_project_info[/code]. Bumped
-## when the response schema gains or changes fields (additive changes only).
-const ASSISTANT_PROTOCOL_VERSION := 3
+## Protocol version reported in [code]get_project_info[/code]. Bumped when
+## requests or responses change.
+const ASSISTANT_PROTOCOL_VERSION := 4
 
-## Vocabulary of requirement tokens recognized in
-## [method IVAssistantTestSuite.get_method_requirements]. Tokens not in this
-## list [code]push_error[/code] at suite load. See SPECIFICATION.md §7.5.
-const KNOWN_TOKENS: Array[String] = [
-	# IVCoreSettings flags
-	"core.allow_time_setting",
-	"core.allow_time_reversal",
-	# IVGlobal.program members
-	"program.TopUI",
-	"program.SpeedManager",
-	"program.Timekeeper",
-	"program.CameraHandler",
-	"program.ViewManager",
-	"program.BodyHUDsState",
-	# Optional autoloads (duck-typed)
-	"autoload.IVSave",
-	# IVCoreSettings.body_tables membership
-	"body_table.stars",
-	"body_table.planets",
-	"body_table.moons",
-	"body_table.asteroids",
-	"body_table.spacecrafts",
-	# Scene-tree widgets — resolved on simulator_started
-	"widget.MouseTargetLabel",
-	# Live RefCounted/Node instance pools — resolved on simulator_started
-	"runtime.IVSmallBodiesGroup",
-]
+## Methods the server itself handles, before any suite.
+const SERVER_METHODS: Array[String] = ["get_project_info", "describe", "get", "call", "quit"]
+
+## Lifecycle roles a project may map to its own signals and methods in
+## [code]AUTOMATION_LIFECYCLE[/code] (SPECIFICATION.md §11.6).
+const LIFECYCLE_SIGNALS: Array[StringName] = [&"initialized", &"started", &"stopping",
+		&"quitting"]
 
 var _tcp_server: TCPServer
 var _clients: Array[StreamPeerTCP] = []
@@ -73,29 +56,30 @@ var _instance_id: String # echoed in get_project_info; lets a launcher find its 
 var _assistant_name: String
 var _context_content: String
 var _listening := false # TCP server is active
-var _sim_started := false # simulator has started, program references cached
+var _sim_started := false # lifecycle "started" has fired (or the project declares no lifecycle)
 var _is_ready := false # readiness gate is open
 var _ready_delay_counter := -1 # -1 = predicate not yet true; 0..N = countdown
 ## Consecutive frames [member ready_predicate] must hold true before
 ## [member _is_ready] flips. Configured via [code]ivoyager_assistant.cfg[/code].
 var _min_ready_delay_frames := 10
-var _save_singleton: Node # IVSave, if present (duck-typed)
-var _pending_config: ConfigFile # held between _ready and _on_core_initialized
+var _pending_config: ConfigFile # held between _ready and _on_initialized
+var _automation: IVAssistantAutomation
+var _lifecycle_object: Object # declares AUTOMATION_LIFECYCLE, or null
+var _quit_method := &""
 
-## Project-supplied readiness condition. Polled each frame after
-## [signal IVStateManager.simulator_started] fires; the readiness gate opens
-## after this returns true for [member _min_ready_delay_frames] consecutive
-## frames. Default predicate is trivially true (gate opens after the frame
-## delay alone). See SPECIFICATION.md §7.4.
+## Project-supplied readiness condition. Polled each frame after the lifecycle
+## "started" signal fires; the readiness gate opens after this returns true for
+## [member _min_ready_delay_frames] consecutive frames. Default predicate is
+## trivially true (gate opens after the frame delay alone). See SPECIFICATION.md §7.4.
 var ready_predicate := func() -> bool: return true
 
 # Test suite infrastructure
+var _godot_tools: IVAssistantGodotTools
+var _widgets: IVAssistantWidgets
+var _builtin_suites: Array[IVAssistantTestSuite] = []
 var _test_suites: Array[IVAssistantTestSuite] = []
-var _method_to_suite: Dictionary[String, IVAssistantTestSuite] = {} # active dispatch table
-var _method_owner: Dictionary[String, IVAssistantTestSuite] = {} # all registered, even if currently gated
-var _method_requirements: Dictionary[String, PackedStringArray] = {} # requirement tokens per method
+var _method_to_suite: Dictionary[String, IVAssistantTestSuite] = {}
 var _method_summaries: Dictionary[String, String] = {} # manifest summaries
-var _gated_methods: Dictionary[String, PackedStringArray] = {} # currently-unmet tokens per gated method
 
 
 func _ready() -> void:
@@ -125,19 +109,63 @@ func _ready() -> void:
 	var context_file: String = config.get_value("assistant", "context_file", "")
 	if context_file:
 		_context_content = _load_context_file(context_file)
-	_save_singleton = get_node_or_null(^"/root/IVSave")
 	_pending_config = config
-	IVStateManager.core_initialized.connect(_on_core_initialized)
-	IVStateManager.simulator_started.connect(_on_simulator_started)
-	IVStateManager.about_to_quit.connect(_on_about_to_quit)
-	IVStateManager.about_to_free_procedural_nodes.connect(_on_about_to_free)
+	_automation = IVAssistantAutomation.new(get_tree())
+	# Other autoloads may follow this one; the lifecycle declaration is read once all are in.
+	_connect_lifecycle.call_deferred()
 
 
-func _on_core_initialized() -> void:
-	# Suite loading is deferred to here so requirement tokens can resolve against
-	# fully-initialized state: IVGlobal.program members, IVCoreSettings flags
-	# (incl. body_tables, set by the project's preinitializer), and any
-	# plugin-managed autoloads.
+## Whether the readiness gate is open. True after the lifecycle "started"
+## signal has fired AND [member ready_predicate] has returned true for
+## [member _min_ready_delay_frames] consecutive frames. Test suites can call
+## this for per-method gating where suite-level [method IVAssistantTestSuite.requires_sim_started]
+## is too coarse.
+func is_ready() -> bool:
+	return _is_ready
+
+
+## The object discovery and dispatch behind [code]describe[/code], [code]get[/code]
+## and [code]call[/code], for suites that take an address.
+func get_automation() -> IVAssistantAutomation:
+	return _automation
+
+
+func _connect_lifecycle() -> void:
+	var found := _automation.find_lifecycle()
+	_lifecycle_object = found[0]
+	var lifecycle: Dictionary = found[1]
+	if !_lifecycle_object:
+		# A project without lifecycle declarations is ready as soon as it runs.
+		_on_initialized()
+		_on_started()
+		return
+	var handlers: Dictionary[StringName, Callable] = {
+		&"initialized": _on_initialized,
+		&"started": _on_started,
+		&"stopping": _on_stopping,
+		&"quitting": _on_quitting,
+	}
+	for role in LIFECYCLE_SIGNALS:
+		var signal_name: StringName = lifecycle.get(role, &"")
+		if !signal_name:
+			continue
+		if !_lifecycle_object.has_signal(signal_name):
+			push_error("IVAssistantServer: AUTOMATION_LIFECYCLE names missing signal '%s'"
+					% signal_name)
+			continue
+		var handler := handlers[role]
+		var arg_count := _get_signal_arg_count(_lifecycle_object, signal_name)
+		if arg_count:
+			handler = handler.unbind(arg_count)
+		_lifecycle_object.connect(signal_name, handler)
+	_quit_method = lifecycle.get(&"quit", &"")
+	if !lifecycle.has(&"initialized"):
+		_on_initialized()
+
+
+func _on_initialized() -> void:
+	# Suites load here so a suite's is_applicable() sees an initialized project.
+	_load_builtin_suites()
 	_load_test_suites(_pending_config)
 	_pending_config = null
 	_tcp_server = TCPServer.new()
@@ -149,33 +177,22 @@ func _on_core_initialized() -> void:
 	print("IVAssistantServer: listening on 127.0.0.1:%d" % _port)
 
 
-func _on_simulator_started() -> void:
+func _on_started() -> void:
 	_sim_started = true
-	for suite in _test_suites:
+	for suite in _builtin_suites + _test_suites:
 		suite._on_simulator_started()
-	# Re-evaluate widget tokens now that the scene tree is populated.
-	_refresh_gating()
 
 
-func _on_about_to_quit() -> void:
-	_shutdown()
-
-
-func _on_about_to_free() -> void:
+func _on_stopping() -> void:
 	_sim_started = false
 	_is_ready = false
 	_ready_delay_counter = -1
-	for suite in _test_suites:
+	for suite in _builtin_suites + _test_suites:
 		suite._on_about_to_free()
 
 
-## Whether the readiness gate is open. True after [signal IVStateManager.simulator_started]
-## has fired AND [member ready_predicate] has returned true for
-## [member _min_ready_delay_frames] consecutive frames. Test suites can call
-## this for per-method gating where suite-level [method IVAssistantTestSuite.requires_sim_started]
-## is too coarse.
-func is_ready() -> bool:
-	return _is_ready
+func _on_quitting() -> void:
+	_shutdown()
 
 
 func _shutdown() -> void:
@@ -197,7 +214,7 @@ func _process(_delta: float) -> void:
 		return
 
 	# Evaluate readiness gate. Once flipped, stays flipped until reset by
-	# _on_about_to_free or _shutdown.
+	# _on_stopping or _shutdown.
 	if _sim_started and !_is_ready:
 		if ready_predicate.call():
 			if _ready_delay_counter < 0:
@@ -275,13 +292,30 @@ func _process_buffer(client: StreamPeerTCP) -> void:
 		client.put_data(response_bytes)
 
 
+# One line holds a request or a JSON-RPC 2.0 batch array, answered in order.
 func _handle_request(line: String) -> String:
 	var parsed: Variant = JSON.parse_string(line)
-	if parsed == null or typeof(parsed) != TYPE_DICTIONARY:
-		return JSON.stringify({"error": {"code": ERR_INVALID_PARAMS, "message": "Invalid JSON"}})
+	_automation.invalidate()
+	if typeof(parsed) == TYPE_ARRAY:
+		var requests: Array = parsed
+		if requests.is_empty():
+			return JSON.stringify(_error_response(null, ERR_INVALID_PARAMS, "Empty batch"))
+		var responses := []
+		for request: Variant in requests:
+			responses.append(_handle_one(request))
+		return JSON.stringify(responses)
+	return JSON.stringify(_handle_one(parsed))
 
+
+func _handle_one(parsed: Variant) -> Dictionary:
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return _error_response(null, ERR_INVALID_PARAMS, "Invalid JSON")
 	var request: Dictionary = parsed
 	var id: Variant = request.get("id")
+	if typeof(id) == TYPE_FLOAT:
+		var id_number: float = id
+		if id_number == roundf(id_number):
+			id = int(id_number)
 	var method: Variant = request.get("method")
 	var params: Variant = request.get("params", {})
 
@@ -306,30 +340,30 @@ func _handle_request(line: String) -> String:
 	if id != null:
 		response["id"] = id
 	response["result"] = result
-	return JSON.stringify(response)
+	return response
 
 
-func _error_response(id: Variant, code: int, message: String) -> String:
+func _error_response(id: Variant, code: int, message: String) -> Dictionary:
 	var response := {}
 	if id != null:
 		response["id"] = id
 	response["error"] = {"code": code, "message": message}
-	return JSON.stringify(response)
+	return response
 
 
 func _dispatch(method: String, params: Dictionary) -> Variant:
-	# Built-in methods (available before simulator_started)
 	match method:
 		"get_project_info":
 			return _get_project_info()
-		"get_state":
-			return _get_state()
-		"start_game":
-			return _start_game()
+		"describe":
+			return _describe(params)
+		"get":
+			return _automation.get_properties(params)
+		"call":
+			return _automation.call_method(params)
 		"quit":
 			return _quit(params)
 
-	# Delegate to test suites
 	var suite: IVAssistantTestSuite = _method_to_suite.get(method)
 	if suite:
 		if suite.requires_sim_started() and !_is_ready:
@@ -349,18 +383,14 @@ func _get_project_info() -> Dictionary:
 	var project_name: String = ProjectSettings.get_setting("application/config/name", "")
 	var project_version: String = ProjectSettings.get_setting("application/config/version", "")
 
-	# Capabilities = union of (built-in method names) + (active suite method
-	# names) + (suite-supplied feature flags, e.g. "mouse_target_id"). Active here
-	# means "currently passes its requirement gating" — gated-out methods are
-	# excluded and reported separately under "gated_out".
+	# Capabilities = server methods + suite methods + suite feature flags (e.g.
+	# "gui_inspection"). A declared member is described by "describe", not here.
 	var capability_set: Dictionary = {}
-	for builtin: String in ["get_state", "quit", "get_project_info"]:
-		capability_set[builtin] = true
-	if IVCoreSettings.wait_for_start:
-		capability_set["start_game"] = true
+	for method_name in SERVER_METHODS:
+		capability_set[method_name] = true
 	for method_name: String in _method_to_suite:
 		capability_set[method_name] = true
-	for suite in _test_suites:
+	for suite in _builtin_suites + _test_suites:
 		for cap: String in suite.get_capabilities():
 			capability_set[cap] = true
 	var capabilities: Array[String] = []
@@ -368,19 +398,12 @@ func _get_project_info() -> Dictionary:
 		capabilities.append(cap)
 	capabilities.sort()
 
-	# v2 manifest fields: per-method summaries and gated-out reasons.
 	var methods: Dictionary = {}
 	for method_name in _method_to_suite:
 		var entry: Dictionary = {}
 		if _method_summaries.has(method_name):
 			entry["summary"] = _method_summaries[method_name]
 		methods[method_name] = entry
-	var gated_out: Array[Dictionary] = []
-	for method_name in _gated_methods:
-		gated_out.append({
-			"method": method_name,
-			"unmet": _gated_methods[method_name],
-		})
 
 	var display_name := _assistant_name if _assistant_name else project_name
 
@@ -389,13 +412,10 @@ func _get_project_info() -> Dictionary:
 		"project_name": project_name,
 		"project_version": project_version,
 		"assistant_name": display_name,
-		"started": IVStateManager.started,
-		"ok_to_start": IVStateManager.ok_to_start,
-		"wait_for_start": IVCoreSettings.wait_for_start,
-		"allow_time_setting": IVCoreSettings.allow_time_setting,
+		"started": _sim_started,
+		"ready": _is_ready,
 		"capabilities": capabilities,
 		"methods": methods,
-		"gated_out": gated_out,
 		"process_id": OS.get_process_id(),
 		"port": _port,
 	}
@@ -406,57 +426,40 @@ func _get_project_info() -> Dictionary:
 	return result
 
 
-func _get_state() -> Dictionary:
-	var result := {
-		"started": IVStateManager.started,
-		"running": IVStateManager.running,
-		"paused_tree": IVStateManager.paused_tree,
-		"paused_by_user": IVStateManager.paused_by_user,
-		"building_system": IVStateManager.building_system,
-		"time": IVGlobal.times[0],
-		"date": [IVGlobal.date[0], IVGlobal.date[1], IVGlobal.date[2]],
-		"clock": [IVGlobal.clock[0], IVGlobal.clock[1], IVGlobal.clock[2]],
-	}
-	var speed_manager: IVSpeedManager = IVGlobal.program.get(&"SpeedManager")
-	if speed_manager:
-		result["speed_index"] = speed_manager.speed_index
-		result["speed_name"] = speed_manager.get_speed_name()
-		result["reversed_time"] = speed_manager.reversed_time
-	else:
-		result["speed_index"] = 0
-		result["speed_name"] = ""
-		result["reversed_time"] = false
-	if _save_singleton:
-		@warning_ignore_start("unsafe_property_access")
-		var is_saving: bool = _save_singleton.is_saving
-		var is_loading: bool = _save_singleton.is_loading
-		@warning_ignore_restore("unsafe_property_access")
-		result["is_saving"] = is_saving
-		result["is_loading"] = is_loading
+# A client's whole context: declared objects, plus the user surface of widgets
+# and input actions unless asked to leave them out.
+func _describe(params: Dictionary) -> Dictionary:
+	var result := _automation.describe(params)
+	if params.get("widgets", true):
+		result["widgets"] = _widgets.list_widgets({}).get("widgets", [])
+	if params.get("actions", true):
+		var actions: Dictionary = _godot_tools.dispatch("list_actions", {})
+		result["actions"] = actions.get("actions", {})
 	return result
-
-
-func _start_game() -> Dictionary:
-	if IVStateManager.started:
-		return {"_error": {"code": ERR_NOT_ALLOWED,
-				"message": "Simulator already started"}}
-	if !IVStateManager.ok_to_start:
-		return {"_error": {"code": ERR_NOT_ALLOWED,
-				"message": "Not ready to start"}}
-	IVStateManager.start()
-	return {"ok": true}
 
 
 func _quit(params: Dictionary) -> Dictionary:
 	var force: bool = params.get("force", false)
-	# Send response before quitting - use call_deferred so the response goes out first
-	IVStateManager.quit.call_deferred(force)
+	# Deferred, so the response goes out first.
+	if _quit_method:
+		_lifecycle_object.call_deferred(_quit_method, force)
+	else:
+		get_tree().quit.call_deferred()
 	return {"ok": true}
 
 
 # ===========================================================================
 # Test suite loading
 # ===========================================================================
+
+func _load_builtin_suites() -> void:
+	_godot_tools = IVAssistantGodotTools.new()
+	_widgets = IVAssistantWidgets.new()
+	for suite: IVAssistantTestSuite in [_godot_tools, _widgets]:
+		suite._init_test_suite(self)
+		_builtin_suites.append(suite)
+		_register_suite_methods(suite, "built-in")
+
 
 func _load_test_suites(config: ConfigFile) -> void:
 	var section := "assistant_test_suites"
@@ -477,117 +480,25 @@ func _load_test_suites(config: ConfigFile) -> void:
 			print("IVAssistantServer: gated suite '%s' (not applicable)" % key)
 			continue
 		_test_suites.append(suite)
-		var requirements: Dictionary = suite.get_method_requirements()
-		var summaries: Dictionary = suite.get_method_summaries()
-		for method_name in suite.get_method_names():
-			if _method_owner.has(method_name):
-				push_warning("IVAssistantServer: method '%s' registered by multiple test suites; '%s' wins" % [method_name, key])
-			_method_owner[method_name] = suite
-			_method_requirements[method_name] = _normalize_requirements(
-					requirements.get(method_name, []), method_name, key)
-			var summary_var: Variant = summaries.get(method_name)
-			if typeof(summary_var) == TYPE_STRING:
-				var summary: String = summary_var
-				_method_summaries[method_name] = summary
+		_register_suite_methods(suite, key)
 		print("IVAssistantServer: loaded test suite '%s'" % key)
-	_refresh_gating()
 
 
-# Validates a method's requirement tokens against [constant KNOWN_TOKENS].
-# Unknown tokens [code]push_error[/code] and are dropped from the returned
-# array (the method is then registered as unconditionally available, which
-# matches the suite-author's intent of "no recognized restriction").
-func _normalize_requirements(value: Variant, method_name: String,
-		suite_key: String) -> PackedStringArray:
-	var out := PackedStringArray()
-	if typeof(value) != TYPE_ARRAY:
-		return out
-	var arr: Array = value
-	for item: Variant in arr:
-		if typeof(item) != TYPE_STRING:
-			push_error("IVAssistantServer: requirement on method '%s' (suite '%s') must be a string, got %s"
-					% [method_name, suite_key, type_string(typeof(item))])
+func _register_suite_methods(suite: IVAssistantTestSuite, key: String) -> void:
+	var summaries: Dictionary = suite.get_method_summaries()
+	for method_name in suite.get_method_names():
+		if SERVER_METHODS.has(method_name):
+			push_warning("IVAssistantServer: suite '%s' can't replace server method '%s'"
+					% [key, method_name])
 			continue
-		var token: String = item
-		if !KNOWN_TOKENS.has(token):
-			push_error("IVAssistantServer: unknown requirement token '%s' on method '%s' (suite '%s')"
-					% [token, method_name, suite_key])
-			continue
-		out.append(token)
-	return out
-
-
-# Re-evaluates every registered method's requirement tokens and rebuilds the
-# active dispatch table ([member _method_to_suite]) and gated list
-# ([member _gated_methods]). Called after [method _load_test_suites] and again
-# on [signal IVStateManager.simulator_started] to resolve widget tokens.
-func _refresh_gating() -> void:
-	_method_to_suite.clear()
-	_gated_methods.clear()
-	for method_name in _method_owner:
-		var reqs: PackedStringArray = _method_requirements[method_name]
-		var unmet := PackedStringArray()
-		for req in reqs:
-			if !_evaluate_token(req):
-				unmet.append(req)
-		if unmet.is_empty():
-			_method_to_suite[method_name] = _method_owner[method_name]
-		else:
-			_gated_methods[method_name] = unmet
-			print("IVAssistantServer: gated method '%s' (unmet: %s)"
-					% [method_name, ", ".join(unmet)])
-
-
-# Evaluates a single requirement token against current runtime state. Widget
-# tokens are unmet before [signal simulator_started] (the scene tree isn't
-# populated yet); they get re-evaluated after sim start via [method _refresh_gating].
-func _evaluate_token(token: String) -> bool:
-	match token:
-		"core.allow_time_setting":
-			return IVCoreSettings.allow_time_setting
-		"core.allow_time_reversal":
-			return IVCoreSettings.allow_time_reversal
-		"program.TopUI":
-			return IVGlobal.program.has(&"TopUI")
-		"program.SpeedManager":
-			return IVGlobal.program.has(&"SpeedManager")
-		"program.Timekeeper":
-			return IVGlobal.program.has(&"Timekeeper")
-		"program.CameraHandler":
-			return IVGlobal.program.has(&"CameraHandler")
-		"program.ViewManager":
-			return IVGlobal.program.has(&"ViewManager")
-		"program.BodyHUDsState":
-			return IVGlobal.program.has(&"BodyHUDsState")
-		"autoload.IVSave":
-			return _save_singleton != null
-		"body_table.stars":
-			return &"stars" in IVCoreSettings.body_tables
-		"body_table.planets":
-			return &"planets" in IVCoreSettings.body_tables
-		"body_table.moons":
-			return &"moons" in IVCoreSettings.body_tables
-		"body_table.asteroids":
-			return &"asteroids" in IVCoreSettings.body_tables
-		"body_table.spacecrafts":
-			return &"spacecrafts" in IVCoreSettings.body_tables
-		"widget.MouseTargetLabel":
-			if !_sim_started:
-				return false
-			return _has_widget(&"TopUI", "MouseTargetLabel")
-		"runtime.IVSmallBodiesGroup":
-			if !_sim_started:
-				return false
-			return !IVSmallBodiesGroup.small_bodies_groups.is_empty()
-	push_error("IVAssistantServer: unknown token '%s' in _evaluate_token" % token)
-	return false
-
-
-func _has_widget(program_key: StringName, widget_name: String) -> bool:
-	var top_node: Node = IVGlobal.program.get(program_key)
-	if !top_node:
-		return false
-	return top_node.find_child(widget_name, true, false) != null
+		if _method_to_suite.has(method_name):
+			push_warning("IVAssistantServer: method '%s' registered by multiple test suites; '%s' wins"
+					% [method_name, key])
+		_method_to_suite[method_name] = suite
+		var summary_var: Variant = summaries.get(method_name)
+		if typeof(summary_var) == TYPE_STRING:
+			var summary: String = summary_var
+			_method_summaries[method_name] = summary
 
 
 func _load_context_file(path: String) -> String:
@@ -599,6 +510,14 @@ func _load_context_file(path: String) -> String:
 		push_warning("IVAssistantServer: failed to open context file: %s" % path)
 		return ""
 	return file.get_as_text()
+
+
+func _get_signal_arg_count(object: Object, signal_name: StringName) -> int:
+	for info in object.get_signal_list():
+		if info.name == signal_name:
+			var args: Array = info.args
+			return args.size()
+	return 0
 
 
 # Command-line user args (after "--") override config, so one machine can run several
