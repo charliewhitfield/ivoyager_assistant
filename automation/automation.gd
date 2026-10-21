@@ -43,8 +43,9 @@ const LIFECYCLE_CONSTANT := &"AUTOMATION_LIFECYCLE"
 const AVAILABLE_METHOD := &"is_automation_available"
 const OBJECTS_METHOD := &"get_automation_objects"
 
-## Dictionary keys of an address that are not key properties.
-const ADDRESS_WORDS: Array[String] = ["class", "path", "name", "via"]
+## Dictionary keys of a keyed address that are not key properties. ("name" is
+## an address word only without "class"; with it, it is a key, as for a node.)
+const ADDRESS_WORDS: Array[String] = ["class", "path", "via"]
 
 static var _autoload_names: Array[String] = []
 static var _autoload_script_names: Dictionary[String, String] = {}
@@ -217,7 +218,9 @@ func call_method(params: Dictionary) -> Variant:
 		return _error(ERR_UNKNOWN_METHOD, "%s declares '%s', which it doesn't have"
 				% [declaration.class_name_, method])
 	converter.error = ""
+	converter.name_scope = _get_enum_names(declaration)
 	var args: Variant = _convert_args(info, params.get("args"))
+	converter.name_scope = {}
 	if converter.error:
 		var message := converter.error
 		converter.error = ""
@@ -820,6 +823,9 @@ func _describe_declaration(declaration: Declaration, full: bool, enums: Dictiona
 
 # Classes no object exposes directly but a declared property holds, such as an
 # orbit a body holds; a client reaches them with an address's "via".
+# Classes no object exposes directly but a declared member holds or returns,
+# such as the orbit a body holds or the views a view manager holds. A client
+# reads them as values, and addresses one held in a property with "via".
 func _describe_reachable_classes(described: Dictionary[Script, bool], classes: Dictionary,
 		full: bool, enums: Dictionary) -> void:
 	var queue: Array[Script] = described.keys()
@@ -827,30 +833,61 @@ func _describe_reachable_classes(described: Dictionary[Script, bool], classes: D
 	while i < queue.size():
 		var declaration := get_declaration(queue[i])
 		i += 1
+		var reaches: Array[Array] = [] # [info, path]
 		for property in declaration.properties:
-			var info: Dictionary = declaration.property_infos.get(property, {})
-			if info.get("type", TYPE_NIL) != TYPE_OBJECT:
-				continue
-			var property_class: StringName = info.get("class_name", &"")
-			var script := get_global_script(property_class)
+			reaches.append([declaration.property_infos.get(property, {}),
+					"%s.%s" % [declaration.class_name_, property]])
+		for method in declaration.methods:
+			var method_info: Dictionary = declaration.method_infos.get(method, {})
+			reaches.append([method_info.get("return", {}),
+					"%s.%s()" % [declaration.class_name_, method]])
+		for reach in reaches:
+			var info: Dictionary = reach[0]
+			var path: String = reach[1]
+			var script := get_global_script(_get_held_class(info))
 			if !script:
 				continue
 			var reached := get_declaration(script)
 			if !reached.participates():
 				continue
 			var reached_name := String(reached.class_name_)
-			var path := "%s.%s" % [declaration.class_name_, property]
 			if described.has(script):
 				var reached_entry: Dictionary = classes.get(reached_name, {})
-				var paths: Array = reached_entry.get("via", [])
-				if reached_entry.has("via") and !paths.has(path):
+				var paths: Array = reached_entry.get("reached_by", [])
+				if reached_entry.has("reached_by") and !paths.has(path):
 					paths.append(path)
 				continue
 			described[script] = true
 			queue.append(script)
 			var entry := _describe_declaration(reached, full, enums)
-			entry["via"] = [path]
+			entry["reached_by"] = [path]
 			classes[reached_name] = entry
+
+
+# The class of an object, or of a typed array's elements or a typed dictionary's
+# values, that [param info] describes; &"" if none.
+func _get_held_class(info: Dictionary) -> StringName:
+	var hint: int = info.get("hint", PROPERTY_HINT_NONE)
+	var hint_string: String = info.get("hint_string", "")
+	match info.get("type", TYPE_NIL):
+		TYPE_OBJECT:
+			return info.get("class_name", &"")
+		TYPE_ARRAY:
+			if hint == PROPERTY_HINT_ARRAY_TYPE:
+				return StringName(hint_string)
+		TYPE_DICTIONARY:
+			if hint == PROPERTY_HINT_DICTIONARY_TYPE and hint_string.count(";") == 1:
+				return StringName(hint_string.get_slice(";", 1))
+	return &""
+
+
+# Every enum value name the declaring chain defines, for an integer argument
+# given by name.
+func _get_enum_names(declaration: Declaration) -> Dictionary:
+	var names := {}
+	for enum_name in declaration.enums:
+		names.merge(declaration.enums[enum_name], true)
+	return names
 
 
 func _note_enum(info: Dictionary, enums: Dictionary) -> void:

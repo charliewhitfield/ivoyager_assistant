@@ -34,6 +34,9 @@ const MAX_OBJECT_DEPTH := 3
 
 ## Message of the last failed conversion, or "".
 var error := ""
+## Enum value names an integer argument may be given by, alone or in an array
+## of flags: the declaring class's own enums, set around one call's conversion.
+var name_scope := {}
 
 var _automation_ref: WeakRef # IVAssistantAutomation, which holds this
 var _variant_types: Dictionary[String, int] = {} # type_string() -> Variant.Type
@@ -60,6 +63,9 @@ func from_json(value: Variant, info: Dictionary, label: String) -> Variant:
 		return _variant_from_json(value)
 	if type == TYPE_INT and usage & PROPERTY_USAGE_CLASS_IS_ENUM:
 		return _enum_from_json(value, class_name_, label)
+	if type == TYPE_INT and name_scope and (typeof(value) == TYPE_STRING
+			or typeof(value) == TYPE_ARRAY):
+		return _scoped_names_from_json(value, label)
 	if type == TYPE_OBJECT:
 		if value == null:
 			return null
@@ -357,6 +363,22 @@ func _enum_from_json(value: Variant, enum_name: StringName, label: String) -> Va
 			return flags
 	return _fail("%s must be a name in %s, an array of them (flags), or an integer" % [label,
 			enum_name])
+
+
+func _scoped_names_from_json(value: Variant, label: String) -> Variant:
+	var names: Array = [value] if typeof(value) == TYPE_STRING else value
+	var flags := 0
+	for item: Variant in names:
+		if typeof(item) == TYPE_FLOAT or typeof(item) == TYPE_INT:
+			var number: float = item
+			flags |= int(number)
+			continue
+		var key := str(item)
+		if !name_scope.has(key):
+			return _fail("%s: '%s' is not an enum value name of this class" % [label, key])
+		var flag: int = name_scope[key]
+		flags |= flag
+	return flags
 
 
 # A hint string names an element type: "int", "StringName", "IVBody", or Godot's
