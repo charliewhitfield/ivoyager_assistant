@@ -1,4 +1,4 @@
-# save_suite.gd
+# core_test_suite.gd
 # This file is part of I, Voyager
 # https://ivoyager.dev
 # *****************************************************************************
@@ -19,11 +19,14 @@
 # *****************************************************************************
 extends IVAssistantTestSuite
 
-## Save/load methods for [IVAssistantServer], for projects with the Save plugin.
+## Simulator state, start, screenshot and save/load methods for [IVAssistantServer].
 ##
-## Duck-typed against the [code]IVSave[/code] autoload, and not applicable
-## without it. These retire once the Save plugin declares its own automation
-## members (SPECIFICATION.md §11).
+## Also adds [code]ok_to_start[/code], [code]wait_for_start[/code] and
+## [code]allow_time_setting[/code] to [code]get_project_info[/code].
+## [code]screenshot[/code] here adds [code]hide_gui[/code] to the built-in one,
+## which handles its other parameters.
+##
+## @deprecated: Classes now declare these members; use describe, get and call (SPECIFICATION.md §11).
 
 var _save_singleton: Node # IVSave, if present (duck-typed)
 
@@ -33,20 +36,39 @@ func _init_test_suite(server: Node) -> void:
 	_save_singleton = server.get_node_or_null(^"/root/IVSave")
 
 
-func is_applicable() -> bool:
-	return _save_singleton != null
-
-
 func requires_sim_started() -> bool:
 	return false
 
 
 func get_method_names() -> Array[String]:
-	return ["save_game", "load_game", "get_save_status"]
+	return ["get_state", "start_game", "screenshot", "save_game", "load_game", "get_save_status"]
+
+
+func get_method_requirements() -> Dictionary:
+	return {
+		"save_game": ["autoload.IVSave"],
+		"load_game": ["autoload.IVSave"],
+		"get_save_status": ["autoload.IVSave"],
+	}
+
+
+func add_project_info(info: Dictionary) -> void:
+	info["ok_to_start"] = IVStateManager.ok_to_start
+	info["wait_for_start"] = IVCoreSettings.wait_for_start
+	info["allow_time_setting"] = IVCoreSettings.allow_time_setting
 
 
 func dispatch(method: String, params: Dictionary) -> Variant:
 	match method:
+		"get_state":
+			return _get_state()
+		"start_game":
+			return _start_game()
+		"screenshot":
+			if !IVStateManager.started:
+				return {"_error": {"code": ERR_NOT_STARTED,
+						"message": "Simulator not started"}}
+			return _screenshot(params)
 		"save_game":
 			@warning_ignore("unsafe_method_access")
 			if !_server.is_ready():
@@ -63,6 +85,63 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _get_save_status()
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Unknown method: %s" % method}}
+
+
+func _get_state() -> Dictionary:
+	var result := {
+		"started": IVStateManager.started,
+		"running": IVStateManager.running,
+		"paused_tree": IVStateManager.paused_tree,
+		"paused_by_user": IVStateManager.paused_by_user,
+		"building_system": IVStateManager.building_system,
+		"time": IVGlobal.times[0],
+		"date": [IVGlobal.date[0], IVGlobal.date[1], IVGlobal.date[2]],
+		"clock": [IVGlobal.clock[0], IVGlobal.clock[1], IVGlobal.clock[2]],
+	}
+	var speed_manager: IVSpeedManager = IVGlobal.program.get(&"SpeedManager")
+	if speed_manager:
+		result["speed_index"] = speed_manager.speed_index
+		result["speed_name"] = speed_manager.get_speed_name()
+		result["reversed_time"] = speed_manager.reversed_time
+	else:
+		result["speed_index"] = 0
+		result["speed_name"] = ""
+		result["reversed_time"] = false
+	if _save_singleton:
+		@warning_ignore_start("unsafe_property_access")
+		var is_saving: bool = _save_singleton.is_saving
+		var is_loading: bool = _save_singleton.is_loading
+		@warning_ignore_restore("unsafe_property_access")
+		result["is_saving"] = is_saving
+		result["is_loading"] = is_loading
+	return result
+
+
+func _start_game() -> Dictionary:
+	if IVStateManager.started:
+		return {"_error": {"code": ERR_NOT_ALLOWED,
+				"message": "Simulator already started"}}
+	if !IVStateManager.ok_to_start:
+		return {"_error": {"code": ERR_NOT_ALLOWED,
+				"message": "Not ready to start"}}
+	IVStateManager.start()
+	return {"ok": true}
+
+
+func _screenshot(params: Dictionary) -> Dictionary:
+	var hide_gui_var: Variant = params.get("hide_gui", false)
+	if typeof(hide_gui_var) != TYPE_BOOL:
+		return {"_error": {"code": ERR_INVALID_PARAMS, "message": "'hide_gui' must be a boolean"}}
+	@warning_ignore("unsafe_method_access")
+	var godot_tools: IVAssistantTestSuite = _server.get_godot_tools()
+	if !hide_gui_var:
+		return godot_tools.dispatch("screenshot", params)
+	IVGlobal.show_hide_gui_requested.emit(false, false)
+	var redraw_params := params.duplicate()
+	redraw_params["redraw"] = true
+	var result: Dictionary = godot_tools.dispatch("screenshot", redraw_params)
+	IVGlobal.show_hide_gui_requested.emit(false, true)
+	return result
 
 
 func _save_game(params: Dictionary) -> Dictionary:

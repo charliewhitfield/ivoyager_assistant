@@ -33,6 +33,8 @@ const ERR_INVALID_PARAMS := 2
 const ERR_NOT_FOUND := 3
 const ERR_NOT_STARTED := 4
 const ERR_NOT_ALLOWED := 5
+## @deprecated: Use [constant ERR_NOT_FOUND], the same code.
+const ERR_BODY_NOT_FOUND := ERR_NOT_FOUND
 
 var _server: Node # IVAssistantServer (autoload, no class_name)
 
@@ -70,6 +72,24 @@ func get_capabilities() -> Array[String]:
 ## from the dict get an empty summary.
 func get_method_summaries() -> Dictionary:
 	return {}
+
+
+## Per-method requirement tokens. Map<method_name, Array[String]>, from the
+## vocabulary of [IVAssistantRequirementTokens] (SPECIFICATION.md §7.5).
+## A method with an unmet token is left out of dispatch and reported under
+## [code]gated_out[/code] in [code]get_project_info[/code]. Tokens are
+## evaluated when the suite loads and again on the lifecycle "started" signal.
+##
+## @deprecated: A class gates its own members in is_automation_available() (SPECIFICATION.md §11).
+func get_method_requirements() -> Dictionary:
+	return {}
+
+
+## Adds fields to [code]get_project_info[/code]'s result.
+##
+## @deprecated: Clients read project state from declared properties (SPECIFICATION.md §11).
+func add_project_info(_info: Dictionary) -> void:
+	pass
 
 
 ## Return false to opt this whole suite out of registration. Default true.
@@ -131,6 +151,37 @@ static func parse_vector3(value: Variant, param_name: String) -> Variant:
 	var y: float = arr[1]
 	var z: float = arr[2]
 	return Vector3(x, y, z)
+
+
+## Parses a required body-name param into an [IVBody]. Returns the body on
+## success or an [code]_error[/code] [Dictionary] on failure. [param param_name]
+## is used in error messages.
+##
+## @deprecated: A declared method takes an IVBody parameter by its key (SPECIFICATION.md §11.4).
+static func parse_body(value: Variant, param_name: String) -> Variant:
+	if typeof(value) != TYPE_STRING or value == "":
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "Missing or invalid '%s' parameter" % param_name}}
+	var name_str: String = value
+	var sn := StringName(name_str)
+	if !IVBody.bodies.has(sn):
+		return {"_error": {"code": ERR_NOT_FOUND,
+				"message": "Body not found: %s" % name_str}}
+	return IVBody.bodies[sn]
+
+
+## Returns [param body]'s position summed up the parent chain at [param time]
+## (in heliocentric coordinates for solar-system bodies).
+##
+## @deprecated: Kept for the deprecated Core suites.
+static func get_global_position(body: IVBody, time: float) -> Vector3:
+	var pos := Vector3.ZERO
+	var current: IVBody = body
+	while current:
+		if current.has_orbit():
+			pos += current.get_position_vector(time)
+		current = current.parent
+	return pos
 
 
 ## Converts a [param position] in [param viewport]'s 2D coordinates (a mouse position,

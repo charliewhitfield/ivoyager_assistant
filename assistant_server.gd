@@ -78,8 +78,12 @@ var _godot_tools: IVAssistantGodotTools
 var _widgets: IVAssistantWidgets
 var _builtin_suites: Array[IVAssistantTestSuite] = []
 var _test_suites: Array[IVAssistantTestSuite] = []
-var _method_to_suite: Dictionary[String, IVAssistantTestSuite] = {}
+var _method_to_suite: Dictionary[String, IVAssistantTestSuite] = {} # active dispatch table
+var _method_owner: Dictionary[String, IVAssistantTestSuite] = {} # all registered, even if gated
 var _method_summaries: Dictionary[String, String] = {} # manifest summaries
+# Deprecated requirement-token gating (SPECIFICATION.md §7.5)
+var _method_requirements: Dictionary[String, PackedStringArray] = {}
+var _gated_methods: Dictionary[String, PackedStringArray] = {} # unmet tokens per gated method
 
 
 func _ready() -> void:
@@ -130,6 +134,11 @@ func get_automation() -> IVAssistantAutomation:
 	return _automation
 
 
+## The built-in Godot-level tools, for a suite that extends one of them.
+func get_godot_tools() -> IVAssistantGodotTools:
+	return _godot_tools
+
+
 func _connect_lifecycle() -> void:
 	var found := _automation.find_lifecycle()
 	_lifecycle_object = found[0]
@@ -168,6 +177,7 @@ func _on_initialized() -> void:
 	_load_builtin_suites()
 	_load_test_suites(_pending_config)
 	_pending_config = null
+	_refresh_gating()
 	_tcp_server = TCPServer.new()
 	var err := _tcp_server.listen(_port, "127.0.0.1")
 	if err != OK:
@@ -181,6 +191,7 @@ func _on_started() -> void:
 	_sim_started = true
 	for suite in _builtin_suites + _test_suites:
 		suite._on_simulator_started()
+	_refresh_gating()
 
 
 func _on_stopping() -> void:
@@ -405,6 +416,10 @@ func _get_project_info() -> Dictionary:
 			entry["summary"] = _method_summaries[method_name]
 		methods[method_name] = entry
 
+	var gated_out: Array[Dictionary] = []
+	for method_name in _gated_methods:
+		gated_out.append({"method": method_name, "unmet": _gated_methods[method_name]})
+
 	var display_name := _assistant_name if _assistant_name else project_name
 
 	var result: Dictionary = {
@@ -416,9 +431,12 @@ func _get_project_info() -> Dictionary:
 		"ready": _is_ready,
 		"capabilities": capabilities,
 		"methods": methods,
+		"gated_out": gated_out,
 		"process_id": OS.get_process_id(),
 		"port": _port,
 	}
+	for suite in _test_suites:
+		suite.add_project_info(result)
 	if _instance_id:
 		result["instance_id"] = _instance_id
 	if _context_content:
@@ -484,21 +502,64 @@ func _load_test_suites(config: ConfigFile) -> void:
 		print("IVAssistantServer: loaded test suite '%s'" % key)
 
 
+# A configured suite may replace a built-in suite's method (a deprecated suite
+# extends one that way), never a server method.
 func _register_suite_methods(suite: IVAssistantTestSuite, key: String) -> void:
 	var summaries: Dictionary = suite.get_method_summaries()
+	var requirements: Dictionary = suite.get_method_requirements()
 	for method_name in suite.get_method_names():
 		if SERVER_METHODS.has(method_name):
 			push_warning("IVAssistantServer: suite '%s' can't replace server method '%s'"
 					% [key, method_name])
 			continue
-		if _method_to_suite.has(method_name):
+		if _method_owner.has(method_name) and !_builtin_suites.has(_method_owner[method_name]):
 			push_warning("IVAssistantServer: method '%s' registered by multiple test suites; '%s' wins"
 					% [method_name, key])
-		_method_to_suite[method_name] = suite
+		_method_owner[method_name] = suite
+		_method_requirements[method_name] = _normalize_requirements(
+				requirements.get(method_name, []), method_name, key)
 		var summary_var: Variant = summaries.get(method_name)
 		if typeof(summary_var) == TYPE_STRING:
 			var summary: String = summary_var
 			_method_summaries[method_name] = summary
+
+
+# Drops tokens outside the vocabulary, with an error; the method is then
+# available as if its author named no restriction.
+func _normalize_requirements(value: Variant, method_name: String,
+		suite_key: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	if typeof(value) != TYPE_ARRAY:
+		return out
+	var arr: Array = value
+	for item: Variant in arr:
+		if typeof(item) != TYPE_STRING:
+			push_error("IVAssistantServer: requirement on method '%s' (suite '%s') must be a string, got %s"
+					% [method_name, suite_key, type_string(typeof(item))])
+			continue
+		var token: String = item
+		if !IVAssistantRequirementTokens.KNOWN_TOKENS.has(token):
+			push_error("IVAssistantServer: unknown requirement token '%s' on method '%s' (suite '%s')"
+					% [token, method_name, suite_key])
+			continue
+		out.append(token)
+	return out
+
+
+# Rebuilds the dispatch table from every registered method's requirement tokens,
+# at suite load and on the lifecycle "started" signal.
+func _refresh_gating() -> void:
+	_method_to_suite.clear()
+	_gated_methods.clear()
+	for method_name in _method_owner:
+		var unmet := PackedStringArray()
+		for token in _method_requirements[method_name]:
+			if !IVAssistantRequirementTokens.evaluate(token, _sim_started):
+				unmet.append(token)
+		if unmet.is_empty():
+			_method_to_suite[method_name] = _method_owner[method_name]
+		else:
+			_gated_methods[method_name] = unmet
 
 
 func _load_context_file(path: String) -> String:
