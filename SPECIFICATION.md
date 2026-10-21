@@ -1188,4 +1188,4 @@ Reaching below that surface is a deliberate, marked exception. There are two tod
 
 New write-side Assistant methods should add a row here and bind at the widget level.
 
-> **Planned (not yet implemented):** a generic widget-actuation suite — the write-side sibling of `GuiInspectionSuite` (§4.8) — is planned to let clients press/set bounded GUI controls by node path. See CODING_PLAN.md ("Suite B"). It is intentionally absent from the method catalog above until implemented.
+> **Planned (not yet implemented):** automation — any class, widgets included, declares what a client may read and call through `AUTOMATION_*` members, with its doc comments as descriptions and, for a widget, Godot's accessibility properties; the Assistant discovers and dispatches these without knowing Core. The principle above then becomes guidance for the declaring class, and the token vocabulary of §7.5 retires. See CODING_PLAN.md ("Automation"). It is intentionally absent from the method catalog above until implemented.
