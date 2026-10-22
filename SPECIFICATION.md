@@ -1379,7 +1379,7 @@ Declared members are public API. Renaming or removing one breaks client scripts,
 
 ### 11.2 Objects
 
-The Assistant finds objects when a request arrives, so objects freed on a reset simply drop out:
+The Assistant finds objects when a request arrives and lets them go once it is answered, so it keeps none alive between requests and objects freed on a reset simply drop out:
 
 1. Each autoload (by its autoload name) whose script declares anything.
 2. The objects each found object names in `get_automation_objects()`, by role, breadth first.

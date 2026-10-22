@@ -306,16 +306,22 @@ func _process_buffer(client: StreamPeerTCP) -> void:
 # One line holds a request or a JSON-RPC 2.0 batch array, answered in order.
 func _handle_request(line: String) -> String:
 	var parsed: Variant = JSON.parse_string(line)
-	_automation.invalidate()
+	var response: Variant
 	if typeof(parsed) == TYPE_ARRAY:
 		var requests: Array = parsed
 		if requests.is_empty():
-			return JSON.stringify(_error_response(null, ERR_INVALID_PARAMS, "Empty batch"))
-		var responses := []
-		for request: Variant in requests:
-			responses.append(_handle_one(request))
-		return JSON.stringify(responses)
-	return JSON.stringify(_handle_one(parsed))
+			response = _error_response(null, ERR_INVALID_PARAMS, "Empty batch")
+		else:
+			var responses := []
+			for request: Variant in requests:
+				responses.append(_handle_one(request))
+			response = responses
+	else:
+		response = _handle_one(parsed)
+	# A discovered object held until the next request would outlive a reset in
+	# between, such as the procedural objects a load frees.
+	_automation.release()
+	return JSON.stringify(response)
 
 
 func _handle_one(parsed: Variant) -> Dictionary:
