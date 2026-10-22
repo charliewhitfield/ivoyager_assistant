@@ -11,7 +11,8 @@ The simulator is queried through the Assistant TCP server, calling the
 declared IVBody.get_position_vector() with explicit `time` (TT J2000 seconds),
 which returns the parent-relative position in the J2000 ecliptic basis —
 directly comparable to the Horizons vectors once divided by the declared
-IVUnits.KM.
+IVUnits.KM. A project waiting at its splash screen (IVCoreSettings.wait_for_start)
+is started first.
 
 Pass criterion is the 3D angular separation (parent-centered) between the sim
 and Horizons vectors. Mean-element models legitimately diverge from precise
@@ -153,6 +154,26 @@ def body_address(body_name):
     return {"class": "IVBody", "name": body_name}
 
 
+def start_simulator(client, timeout=120):
+    """Start a project that waits at its splash screen for the user's Start
+    (IVCoreSettings.wait_for_start); until then it has no bodies to test."""
+    if not client.get("IVCoreSettings", "wait_for_start")["wait_for_start"]:
+        return
+    if client.get("IVStateManager", "started")["started"]:
+        return
+    # IVStateManager refuses start (code 5) until its assets are loaded.
+    for _ in range(timeout):
+        try:
+            client.invoke("IVStateManager", "start")
+            print("Called IVStateManager.start")
+            return
+        except AssistantError as error:
+            if error.code != 5:
+                raise
+        time.sleep(1.0)
+    raise RuntimeError(f"IVStateManager.start not available after {timeout} s")
+
+
 def get_present_bodies(client):
     """Return the set of body names the project actually loaded."""
     instances = client.describe(widgets=False, actions=False)["classes"].get(
@@ -266,11 +287,15 @@ def main():
         if launcher:
             launcher.check_instance(client)
 
+        start_simulator(client)
         # Bodies exist once the simulator has started and the readiness gate opens.
         for _ in range(240):
             if client.result("get_project_info").get("ready"):
                 break
             time.sleep(1.0)
+        else:
+            # Without bodies every check skips, which would read as a pass.
+            raise RuntimeError("Simulator not ready after 240 s")
 
         failures, skips = run_tests(client, args.bodies)
         success = not failures
