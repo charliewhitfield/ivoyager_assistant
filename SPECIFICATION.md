@@ -2,10 +2,20 @@
 
 ## 1. Purpose
 
-The Assistant plugin provides a programmatic interface to the I, Voyager simulation with two goals:
+The Assistant plugin provides a programmatic interface to an I, Voyager project, or any Godot project (§8), with two goals:
 
 1. **AI-assisted testing** — Enable AI tools (Claude Code) to query simulation state and exercise controls, verifying correctness of orbital mechanics, scene tree construction, time management, and GUI behavior.
-2. **Accessibility** — Provide a command-based interface that can be driven by voice control, screen readers, or other assistive technologies for solar system navigation.
+2. **AI assistant** — A user talks, by text or voice, with an AI of their choosing, which operates the app on their behalf. It works in any build, the web included: inside the app, through a model the user connects or the project ships beside it, or from the user's own AI application alongside. It is how voice and natural language reach the app, so it serves accessibility first; screen readers, announcements and spatial audio need no AI and belong to the GUI itself (in I, Voyager, Core's widgets), not here.
+
+Both goals use one interface, what a project's classes declare (§11). They differ in the client: a developer's tool outside a debug build, or the user's assistant inside a shipped one.
+
+Goal 2 divides the work three ways:
+
+- **The model** is never part of the plugin. It is a remote service, a local server the user runs, or a server the project ships beside the app.
+- **The plugin** provides the plumbing: connections to models and a setup wizard, the conversation loop that runs the model's tool calls through the declarations, and a chat box.
+- **The project** provides the assistant's personality, the tools it offers, which connections to offer, and the chat box's style and place. The Planetarium puts it in a panel at the bottom center.
+
+Goal 2 is planned (`CODING_PLAN.md` Phase 5); today the plugin serves goal 1.
 
 The plugin knows Godot, not the project. A project's classes declare what a client may read and call (§11), and the Assistant discovers and dispatches those declarations; so a change in Core or in a project needs no change here.
 
@@ -215,7 +225,7 @@ A client's whole context in one call: every declared object and class, with each
 - `objects` — single objects by address: an autoload's name, a role a declaring object names (§11.2), or a class with one instance. `classes` — classes with several instances (keyed, §11.3), and classes that declared members hold or return (`reached_by`), which a client reads as values or addresses with `via`.
 - A method's `args` list each argument's `name`, `type`, `optional`, and `default` where the default is known. Types read as Godot names them: `"float"`, `"Vector3"`, `"Array[StringName]"`, `"IVBody"`, an enum's `"Class.Enum"`, `"Variant"`, `"void"`.
 - `description` is the member's or class's doc comment (§11.5). A Godot-native member a class declares (`name`, `global_position`, `visible`) has none.
-- `surface` is `"user"` for a `Control` — what a user operates or sees — and `"test"` otherwise. The user surface is all an accessibility client should use; the test surface reaches state however the GUI looks.
+- `surface` is `"user"` for a `Control` — what a user operates or sees — and `"test"` otherwise. The user surface is what a user's assistant (§1) operates; the test surface reaches state however the GUI looks.
 - `unavailable` — declared members the class says can't be used now (§11.1). For a keyed class, per instance.
 - `enums` — each enum a member's type names, and each enum constant of a declaring class, by name.
 
@@ -442,7 +452,7 @@ The server, `IVAssistantAutomation` and the built-in tools depend on Godot alone
 
 - All TCP I/O and command processing runs on the main thread in `_process()`
 - This is safe for scene tree access but limits throughput to frame rate (~60 Hz)
-- For a testing/accessibility interface, sub-16ms latency is adequate
+- For testing, and for an assistant whose model answers in seconds, a frame's latency is adequate
 - The server processes all pending complete messages each frame (not just one); a batch runs within one frame
 - A declared method runs on the main thread as any GUI handler does; a class whose members are not main-thread safe gates them in `is_automation_available()` or doesn't declare them
 
@@ -605,7 +615,7 @@ The script skips a step whose object or member the project doesn't declare. Exit
 
 ## 10. Core surface classes (layering principle)
 
-A class declares, for an automated action, **the same entry point its GUI widget calls, at the same abstraction level.** When a control exists in the GUI, the declared method is the one the widget's handler calls — not a lower-level primitive. This keeps an automated action and a user's button click semantically identical and on the same code path, which serves both goals in §1: faithful testing, and accessibility as genuine GUI substitution. (Operating the widget itself, §4.3, is the same path by construction.)
+A class declares, for an automated action, **the same entry point its GUI widget calls, at the same abstraction level.** When a control exists in the GUI, the declared method is the one the widget's handler calls — not a lower-level primitive. This keeps an automated action and a user's button click semantically identical and on the same code path, which serves both goals in §1: faithful testing, and an assistant whose actions are the user's own. (Operating the widget itself, §4.3, is the same path by construction.)
 
 Declaring a member below that surface is a deliberate, marked exception, and its doc comment says so. There are two in Core:
 

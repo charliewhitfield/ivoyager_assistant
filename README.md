@@ -1,15 +1,15 @@
 # ivoyager_assistant
 
-AI assistant for accessible solar system navigation. Also provides AI interface for development tests.
+AI assistant that operates an app for its user, by text or voice. Also provides AI interface for development tests.
 
 UNDER DEVELOPMENT!
 
-Today the TCP server (JSON-RPC on `localhost:29071`) is usable for AI-driven testing. The plugin knows Godot, not the project: a project's classes declare what a client may read and call (`AUTOMATION_*` constants), and `describe`, `get` and `call` find and use those declarations, so a change in Core or a project needs no change here. Widgets are listed and operated as a user operates them, named by their accessibility properties. Screenshots, action emulation, mouse-target identification and GUI inspection are built in. The port can be set per process on the command line (`-- --assistant-port=<port>`), so several instances of a project can run at once. `tools/` holds a Python client and test runner. Accessibility features (voice control, screen reader, spatial audio) are planned.
+Today the TCP server (JSON-RPC on `localhost:29071`) is usable for AI-driven testing. The plugin knows Godot, not the project: a project's classes declare what a client may read and call (`AUTOMATION_*` constants), and `describe`, `get` and `call` find and use those declarations, so a change in Core or a project needs no change here. Widgets are listed and operated as a user operates them, named by their accessibility properties. Screenshots, action emulation, mouse-target identification and GUI inspection are built in. The port can be set per process on the command line (`-- --assistant-port=<port>`), so several instances of a project can run at once. `tools/` holds a Python client and test runner. The assistant itself is planned: the plumbing to connect a model, local or remote, a conversation loop that operates the app through the same declarations, and a chat box, with each project supplying the personality and tools.
 
 This plugin will provide an interface so that AI can navigate the solar system, change anything accessible in the GUI (options, HUDs visibilities and colors, etc.), know what's on screen, and check on what's happening elsewhere. The motivation is twofold:
 
 1. So AI can conduct tests (prerequisite to any serious AI-assisted coding).
-2. So the Planetarium and other I, Voyager apps can be more accessible, for example, allowing navigation around the solar system via voice control.
+2. So a user can ask an AI of their choosing, by voice or text, to operate the app for them: in the Planetarium, to take them around the solar system and explain what they see. This makes the app more accessible. The model is never part of the plugin; the user connects one, local or remote, or the project ships one beside the app.
 
 The plugin itself is being developed using Claude Code. See Claude's specs and plans in:
 
