@@ -4,7 +4,7 @@ AI assistant for accessible solar system navigation. Also provides AI interface 
 
 UNDER DEVELOPMENT!
 
-Today the TCP server (JSON-RPC on `localhost:29071`) is usable for AI-driven testing — state queries, body queries, controls, screenshots, save/load, action emulation, and generic GUI inspection. Accessibility features (voice control, screen reader, spatial audio) are planned.
+Today the TCP server (JSON-RPC on `localhost:29071`) is usable for AI-driven testing. The plugin knows Godot, not the project: a project's classes declare what a client may read and call (`AUTOMATION_*` constants), and `describe`, `get` and `call` find and use those declarations, so a change in Core or a project needs no change here. Widgets are listed and operated as a user operates them, named by their accessibility properties. Screenshots, action emulation, mouse-target identification and GUI inspection are built in. The port can be set per process on the command line (`-- --assistant-port=<port>`), so several instances of a project can run at once. `tools/` holds a Python client and test runner. Accessibility features (voice control, screen reader, spatial audio) are planned.
 
 This plugin will provide an interface so that AI can navigate the solar system, change anything accessible in the GUI (options, HUDs visibilities and colors, etc.), know what's on screen, and check on what's happening elsewhere. The motivation is twofold:
 
@@ -13,5 +13,5 @@ This plugin will provide an interface so that AI can navigate the solar system, 
 
 The plugin itself is being developed using Claude Code. See Claude's specs and plans in:
 
-- SPECIFICATION.md
-- CODING_PLAN.md
+- SPECIFICATION.md — the protocol, every method, configuration and the test tools
+- CODING_PLAN.md — what is done and what is planned

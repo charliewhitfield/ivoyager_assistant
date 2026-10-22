@@ -20,6 +20,8 @@
 extends IVAssistantTestSuite
 
 ## State and body query methods for [IVAssistantServer].
+##
+## @deprecated: Classes now declare these members; use describe, get and call (SPECIFICATION.md §11).
 
 const BodyFlags := IVBody.BodyFlags
 

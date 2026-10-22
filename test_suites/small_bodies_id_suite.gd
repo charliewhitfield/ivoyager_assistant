@@ -34,7 +34,9 @@ extends IVAssistantTestSuite
 ## [IVSmallBodiesGroup] instances (e.g. projects that disable SBG building
 ## via [member IVTableSystemBuilder.add_small_bodies_groups] = false, or
 ## omit the [code]small_bodies_groups[/code] table). Re-evaluated on
-## [signal IVStateManager.simulator_started].
+## [signal IVStateManager.simulator_started].[br][br]
+##
+## @deprecated: Classes now declare these members; use describe, get and call (SPECIFICATION.md §11).
 
 
 func get_method_names() -> Array[String]:

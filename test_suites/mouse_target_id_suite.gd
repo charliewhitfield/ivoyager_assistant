@@ -27,15 +27,14 @@ extends IVAssistantTestSuite
 ## [code]IVFragmentIdentifier[/code]'s shader-encoded ids on bodies, body
 ## meshes, and orbit lines, surfaced via [IVMouseTargetLabel]):[br][br]
 ##
-## - [code]warp_mouse[/code] synthesizes an [InputEventMouseMotion] at a
-##   given window pixel.[br]
 ## - [code]project_to_screen[/code] converts a body-anchored or raw
 ##   world-space position into window pixel coordinates.[br]
 ## - [code]get_hover_target[/code] reads the current [IVMouseTargetLabel]
 ##   text and visibility.[br][br]
 ##
-## All three share one pixel space with [code]screenshot[/code]: the window's own
-## pixels, which the Core plugin's display scale makes finer than the GUI's.[br][br]
+## Both share one pixel space with [code]screenshot[/code] and the built-in
+## [code]warp_mouse[/code]: the window's own pixels, which the Core plugin's
+## display scale makes finer than the GUI's.[br][br]
 ##
 ## [IVSmallBodiesGroup] point projection lives in
 ## [code]SmallBodiesIdSuite[/code] (see [code]small_bodies_id_suite.gd[/code])
@@ -44,7 +43,12 @@ extends IVAssistantTestSuite
 ## The suite reads [member IVMouseTargetLabel.text] (the user-visible effect)
 ## rather than any specific identifier API, so tests written against this
 ## suite remain valid across replacement of the underlying identification
-## mechanism.
+## mechanism.[br][br]
+##
+## [code]project_to_screen[/code] here adds [code]body[/code] and
+## [code]time[/code] to the built-in one, which handles its other parameters.
+##
+## @deprecated: Classes now declare these members; use describe, get and call (SPECIFICATION.md §11).
 
 var _mouse_target_label: IVMouseTargetLabel
 
@@ -63,7 +67,7 @@ func _on_about_to_free() -> void:
 
 
 func get_method_names() -> Array[String]:
-	return ["warp_mouse", "project_to_screen", "get_hover_target"]
+	return ["project_to_screen", "get_hover_target"]
 
 
 func get_method_requirements() -> Dictionary:
@@ -78,8 +82,6 @@ func get_capabilities() -> Array[String]:
 
 func dispatch(method: String, params: Dictionary) -> Variant:
 	match method:
-		"warp_mouse":
-			return _warp_mouse(params)
 		"project_to_screen":
 			return _project_to_screen(params)
 		"get_hover_target":
@@ -88,77 +90,47 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			"message": "Unknown method: %s" % method}}
 
 
-func _warp_mouse(params: Dictionary) -> Variant:
-	var pos_var: Variant = params.get("position")
-	if typeof(pos_var) != TYPE_ARRAY:
-		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "'position' must be an array of 2 numbers"}}
-	var pos_arr: Array = pos_var
-	if pos_arr.size() != 2:
-		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "'position' must have exactly 2 elements"}}
-	for i in 2:
-		if typeof(pos_arr[i]) != TYPE_FLOAT and typeof(pos_arr[i]) != TYPE_INT:
-			return {"_error": {"code": ERR_INVALID_PARAMS,
-					"message": "'position' elements must be numbers"}}
-	var x: float = pos_arr[0]
-	var y: float = pos_arr[1]
-	var screen_pos := Vector2(x, y)
-	var motion := InputEventMouseMotion.new()
-	motion.position = screen_pos
-	motion.global_position = screen_pos
-	Input.parse_input_event(motion)
-	return {"ok": true, "position": [x, y]}
-
-
 func _project_to_screen(params: Dictionary) -> Variant:
 	var has_body := params.has("body")
-	var has_world := params.has("world_position")
-	var mode_count := int(has_body) + int(has_world)
-	if mode_count != 1:
+	if !has_body:
+		@warning_ignore("unsafe_method_access")
+		var godot_tools: IVAssistantTestSuite = _server.get_godot_tools()
+		return godot_tools.dispatch("project_to_screen", params)
+	if params.has("world_position") or params.has("node"):
 		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "Provide exactly one of 'body' or 'world_position'"}}
+				"message": "Provide exactly one of 'body', 'node' or 'world_position'"}}
 
 	var world_pos: Vector3
-
-	if has_body:
-		var body_or_err: Variant = IVAssistantTestSuite.parse_body(params.get("body"), "body")
-		if body_or_err is Dictionary:
-			return body_or_err
-		var body: IVBody = body_or_err
-		var time_var: Variant = params.get("time")
-		if time_var == null:
-			# IVBody extends Node3D — global_position is already in Godot scene-tree
-			# world coordinates.
-			world_pos = body.global_position
-		else:
-			if typeof(time_var) != TYPE_FLOAT and typeof(time_var) != TYPE_INT:
-				return {"_error": {"code": ERR_INVALID_PARAMS,
-						"message": "'time' must be a number"}}
-			var time_num: float = time_var
-			# Build the body's Godot world position at sim time `time_num`:
-			# walk the parent chain summing each ancestor's per-parent local
-			# orbit position (already in Godot scene-tree units), then add the
-			# topmost body's static global_position to anchor the chain in
-			# world space (the universe origin is offset from the Sun via
-			# origin-shifting). Useful for landing on the body's orbit line
-			# where the body itself isn't.
-			var helio := Vector3.ZERO
-			var current: IVBody = body
-			var root: IVBody = body
-			while current:
-				root = current
-				if current.has_orbit():
-					helio += current.get_position_vector(time_num)
-				current = current.parent
-			world_pos = root.global_position + helio
+	var body_or_err: Variant = IVAssistantTestSuite.parse_body(params.get("body"), "body")
+	if body_or_err is Dictionary:
+		return body_or_err
+	var body: IVBody = body_or_err
+	var time_var: Variant = params.get("time")
+	if time_var == null:
+		# IVBody extends Node3D — global_position is already in Godot scene-tree
+		# world coordinates.
+		world_pos = body.global_position
 	else:
-		var pos_or_err: Variant = IVAssistantTestSuite.parse_vector3(
-				params.get("world_position"), "world_position")
-		if pos_or_err is Dictionary:
-			return pos_or_err
-		var parsed_pos: Vector3 = pos_or_err
-		world_pos = parsed_pos
+		if typeof(time_var) != TYPE_FLOAT and typeof(time_var) != TYPE_INT:
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'time' must be a number"}}
+		var time_num: float = time_var
+		# Build the body's Godot world position at sim time `time_num`:
+		# walk the parent chain summing each ancestor's per-parent local
+		# orbit position (already in Godot scene-tree units), then add the
+		# topmost body's static global_position to anchor the chain in
+		# world space (the universe origin is offset from the Sun via
+		# origin-shifting). Useful for landing on the body's orbit line
+		# where the body itself isn't.
+		var helio := Vector3.ZERO
+		var current: IVBody = body
+		var root: IVBody = body
+		while current:
+			root = current
+			if current.has_orbit():
+				helio += current.get_position_vector(time_num)
+			current = current.parent
+		world_pos = root.global_position + helio
 
 	var viewport: Viewport = _server.get_viewport()
 	var camera: Camera3D = viewport.get_camera_3d()

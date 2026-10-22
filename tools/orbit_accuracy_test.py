@@ -7,10 +7,12 @@ JPL Horizons API (EPHEM_TYPE=VECTORS, REF_PLANE=ECLIPTIC, REF_SYSTEM=J2000,
 position relative to parent body center, km) so the test runs offline and is
 reproducible.
 
-The simulator is queried via the Assistant TCP server's `get_body_position`
-with explicit `time` (TT J2000 seconds), which returns the parent-relative
-position in the J2000 ecliptic basis — directly comparable to the Horizons
-vectors after unit scaling.
+The simulator is queried through the Assistant TCP server, calling the
+declared IVBody.get_position_vector() with explicit `time` (TT J2000 seconds),
+which returns the parent-relative position in the J2000 ecliptic basis —
+directly comparable to the Horizons vectors once divided by the declared
+IVUnits.KM. A project waiting at its splash screen (IVCoreSettings.wait_for_start)
+is started first.
 
 Pass criterion is the 3D angular separation (parent-centered) between the sim
 and Horizons vectors. Mean-element models legitimately diverge from precise
@@ -26,11 +28,11 @@ Usage:
 
 import argparse
 import math
-import os
-import re
 import sys
+import time
 
-from assistant_test import DEFAULT_PORT, AssistantClient, GodotLauncher
+from assistant_test import DEFAULT_PORT, AssistantClient, AssistantError, GodotLauncher
+from godot_executable import find_godot_executable
 
 EPOCH_JD = 2451545.0  # J2000
 DAY_SECONDS = 86400.0
@@ -131,46 +133,6 @@ DEFAULT_ANGLE_TOLERANCE_DEG = 3.0
 RADIUS_RATIO_TOLERANCE = 0.10  # |sim|/|ref| within +/-10%
 
 
-def find_godot_executable(project_dir):
-    """Newest Godot console exe in the project's parent dir matching the
-    major version pinned by project.godot config/features."""
-    config_path = os.path.join(project_dir, "project.godot")
-    major = None
-    try:
-        with open(config_path, encoding="utf-8") as config_file:
-            match = re.search(r'config/features=PackedStringArray\("(\d+\.\d+)"',
-                              config_file.read())
-            if match:
-                major = match.group(1)
-    except OSError:
-        pass
-
-    parent_dir = os.path.dirname(os.path.abspath(project_dir))
-    candidates = []
-    for filename in os.listdir(parent_dir):
-        match = re.match(r"Godot_v(\d+\.\d+(?:\.\d+)?)-?(\w*)_win64_console\.exe",
-                         filename)
-        if not match:
-            continue
-        version, stage = match.group(1), match.group(2)
-        if major and not version.startswith(major):
-            continue
-        stage_rank = {"dev": 0, "beta": 1, "rc": 2, "stable": 3}
-        stage_match = re.match(r"(dev|beta|rc|stable)(\d*)", stage)
-        if stage_match:
-            rank = stage_rank[stage_match.group(1)]
-            iteration = int(stage_match.group(2) or 0)
-        else:
-            rank, iteration = 3, 0
-        version_key = tuple(int(p) for p in version.split("."))
-        candidates.append((version_key, rank, iteration,
-                           os.path.join(parent_dir, filename)))
-    if not candidates:
-        return None
-    candidates.sort()
-    return candidates[-1][3]
-
-
 def angle_between_deg(a, b):
     dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     norm_a = math.sqrt(sum(c * c for c in a))
@@ -188,23 +150,44 @@ def ecliptic_lon_lat_deg(v):
     return lon, lat
 
 
+def body_address(body_name):
+    return {"class": "IVBody", "name": body_name}
+
+
+def start_simulator(client, timeout=120):
+    """Start a project that waits at its splash screen for the user's Start
+    (IVCoreSettings.wait_for_start); until then it has no bodies to test."""
+    if not client.get("IVCoreSettings", "wait_for_start")["wait_for_start"]:
+        return
+    if client.get("IVStateManager", "started")["started"]:
+        return
+    # IVStateManager refuses start (code 5) until its assets are loaded.
+    for _ in range(timeout):
+        try:
+            client.invoke("IVStateManager", "start")
+            print("Called IVStateManager.start")
+            return
+        except AssistantError as error:
+            if error.code != 5:
+                raise
+        time.sleep(1.0)
+    raise RuntimeError(f"IVStateManager.start not available after {timeout} s")
+
+
 def get_present_bodies(client):
-    """Return the set of body names the project actually loaded, or None if the
-    list_bodies capability is unavailable (then presence isn't gated)."""
-    response = client.call("list_bodies", {"filter": "all"})
-    if "error" in response:
-        return None
-    return set(response.get("result", {}).get("bodies", []))
+    """Return the set of body names the project actually loaded."""
+    instances = client.describe(widgets=False, actions=False)["classes"].get(
+        "IVBody", {}).get("instances", [])
+    return {instance["name"] for instance in instances}
 
 
 def get_orbit_class(client, body_name, cache):
-    """Report a body's orbit model class (e.g. 'IVRealPlanetOrbit'), cached.
-    Falls back to 'IVOrbit' if the field is absent (older plugin) so far-date
-    planet checks degrade to skipped rather than asserted."""
+    """Report a body's orbit model class (e.g. 'IVRealPlanetOrbit'), cached, from
+    the class its orbit value reports."""
     if body_name in cache:
         return cache[body_name]
-    response = client.call("get_body_orbit", {"name": body_name})
-    orbit_class = response.get("result", {}).get("orbit_class", "IVOrbit")
+    orbit = client.get(body_address(body_name), "orbit")["orbit"]
+    orbit_class = orbit.get("class", "IVOrbit") if orbit else "IVOrbit"
     cache[body_name] = orbit_class
     return orbit_class
 
@@ -213,6 +196,8 @@ def run_tests(client, body_filter=None):
     failures = []
     skips = []
     present_bodies = get_present_bodies(client)
+    # Sim units per km; the project's scale (IVUnits.METER) need not be 1.
+    km = client.get("IVUnits", "KM")["KM"]
     orbit_class_cache = {}
     print(f"\n{'body':14s} {'jd_tdb':>12s} {'angle':>8s} {'dlon':>8s} "
           f"{'r_ratio':>8s} {'tol':>5s}  result")
@@ -223,7 +208,7 @@ def run_tests(client, body_filter=None):
             continue
         # Skip bodies this project doesn't load (different/smaller body set) so
         # the runner stays useful across projects rather than reporting failures.
-        if present_bodies is not None and body_name not in present_bodies:
+        if body_name not in present_bodies:
             skips.append(f"{body_name}: not loaded in this project")
             print(f"{body_name:14s} {'(all dates)':>12s}  SKIP: body not loaded")
             continue
@@ -241,13 +226,13 @@ def run_tests(client, body_filter=None):
                     continue
 
             time_seconds = (jd_tdb - EPOCH_JD) * DAY_SECONDS
-            response = client.call("get_body_position",
-                                   {"name": body_name, "time": time_seconds})
-            if "error" in response:
-                failures.append(f"{body_name} @ {jd_tdb}: {response['error']}")
-                print(f"{body_name:14s} {jd_tdb:12.4f}  ERROR: {response['error']}")
+            try:
+                sim_vector = [component / km for component in client.invoke(
+                    body_address(body_name), "get_position_vector", time=time_seconds)]
+            except AssistantError as error:
+                failures.append(f"{body_name} @ {jd_tdb}: {error}")
+                print(f"{body_name:14s} {jd_tdb:12.4f}  ERROR: {error}")
                 continue
-            sim_vector = response["result"]["position"]
 
             angle = angle_between_deg(sim_vector, ref_vector)
             sim_lon, _sim_lat = ecliptic_lon_lat_deg(sim_vector)
@@ -285,9 +270,9 @@ def main():
 
     launcher = None
     if args.launch:
-        godot = args.godot or find_godot_executable(args.project)
+        godot = args.godot or find_godot_executable(args.project, on_message=print)
         if not godot:
-            print("No Godot console executable found; use --godot PATH")
+            print("No Godot console executable of the project's major; use --godot PATH")
             sys.exit(2)
         print(f"Launching: {godot} --path {args.project}")
         launcher = GodotLauncher(godot, args.project, port=args.port or 0)
@@ -302,14 +287,15 @@ def main():
         if launcher:
             launcher.check_instance(client)
 
-        # Sim-gated methods return error 4 until the readiness gate opens. Probe
-        # list_bodies (no specific body required) until it returns a result.
-        import time as time_module
-        for _ in range(60):
-            response = client.call("list_bodies", {"filter": "all"})
-            if "result" in response:
+        start_simulator(client)
+        # Bodies exist once the simulator has started and the readiness gate opens.
+        for _ in range(240):
+            if client.result("get_project_info").get("ready"):
                 break
-            time_module.sleep(1.0)
+            time.sleep(1.0)
+        else:
+            # Without bodies every check skips, which would read as a pass.
+            raise RuntimeError("Simulator not ready after 240 s")
 
         failures, skips = run_tests(client, args.bodies)
         success = not failures

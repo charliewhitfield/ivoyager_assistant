@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.1.dev. The TCP server, modular test suite architecture, and the generic state / control / body / camera / view / time / selection / speed / save / load / GUI-inspection / screenshot / action-emulation APIs are all in place, plus a Python test runner. Remaining work centers on settings/HUD typed APIs and accessibility.
+v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier Core-bound suites remain, deprecated, until external projects move. Remaining work: retiring those suites, and accessibility.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -17,49 +17,28 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
 - **Save/load** (in `CoreTestSuite`) — `save_game`, `load_game`, `get_save_status`. Available only when `ivoyager_save` is present.
 - **Readiness gate** — `ready_predicate` + `min_ready_delay_frames` + `IVAssistantServer.is_ready()`. Lets projects with deferred main-thread initialization gate save/load and similar operations until state has settled.
 - **Test runner** — `tools/assistant_test.py` implements the SPECIFICATION.md §9.3 sequence; capability-aware, skips unsupported features.
-- **Phase 3d — Mouse hover identification** (`MouseHoverSuite`) — `warp_mouse`, `project_to_screen`, `get_hover_target`. Lets tests verify that hovering at a given screen position identifies the expected element by reading `IVMouseTargetLabel.text`. The suite never references `IVFragmentIdentifier` directly, so it serves as a regression safety net for the upcoming replacement of that class with a more efficient identifier (e.g. Compositors-based) — tests written today should continue to pass after the swap, validating that the user-visible effect is preserved.
+- **Phase 3d — Mouse hover identification** (`MouseTargetIdSuite`, plus `SmallBodiesIdSuite` for asteroid points) — `warp_mouse`, `project_to_screen`, `get_hover_target`, `project_small_body_to_screen`. Positions are in window pixels, the same as a screenshot's. Lets tests verify that hovering at a given screen position identifies the expected element by reading `IVMouseTargetLabel.text`. The suite never references `IVFragmentIdentifier` directly, so it serves as a regression safety net for the upcoming replacement of that class with a more efficient identifier (e.g. Compositors-based) — tests written today should continue to pass after the swap, validating that the user-visible effect is preserved.
 
-- **Phase 3e — Views** (`ViewSuite`) — `list_views`, `apply_view`. Binds Tier-1 camera framing to `IVViewManager.set_table_view` — the same Core call the GUI's default `IVViewButton` makes — so an agent frames the camera the way a user clicks a view button, instead of hand-building a perspective-distance vector through `move_camera`. `list_views` decodes each table view's target, tracking mode, up-lock, framing vector, and affected state categories (`IVView` has no description field). Scope is table views only; user/cached views are deferred to "Suite B". Established the "Core surface classes / layering principle" (`SPECIFICATION.md` §10): Assistant methods bind to the same Core entry points GUI widgets do, at the same level; sub-surface access (e.g. `move_camera`) is the marked exception. Also corrected the `IVCamera` / `IVCameraHandler` / `IVViewManager.set_table_view` doc comments to state the perspective-distance contract in caller terms and point to views as the normal path.
+- **Phase 3e — Views** (`ViewSuite`) — `list_views`, `apply_view`. Binds Tier-1 camera framing to `IVViewManager.set_table_view` — the same Core call the GUI's default `IVViewButton` makes — so an agent frames the camera the way a user clicks a view button, instead of hand-building a perspective-distance vector through `move_camera`. (`move_camera` has since gained a `tracking` parameter, and `set_camera_fov` sets zoom.) `list_views` decodes each table view's target, tracking mode, up-lock, framing vector, and affected state categories (`IVView` has no description field). `list_cached_views` / `apply_cached_view` later added the user's own saved views. Established the "Core surface classes / layering principle" (`SPECIFICATION.md` §10): Assistant methods bind to the same Core entry points GUI widgets do, at the same level; sub-surface access (e.g. `move_camera`) is the marked exception. Also corrected the `IVCamera` / `IVCameraHandler` / `IVViewManager.set_table_view` doc comments to state the perspective-distance contract in caller terms and point to views as the normal path.
+- **HUD visibility** (in `ControlSuite` and `SmallBodiesIdSuite`) — `set_huds` (hides or shows everything at once, as the GUI's hide-HUDs button does), `set_all_body_orbits_visibility`, `set_body_orbit_visible_flags`, `set_small_body_points_visibility`. The per-flag setters return the previous state so a test can restore it.
+- **Parallel instances** — `--assistant-port` / `--assistant-instance` command-line arguments, `process_id` / `port` / `instance_id` in `get_project_info`, and `GodotLauncher` (`tools/assistant_test.py`) launching on a free port, tied to its script and held to one logical processor per core.
+- **Phase 4 — Settings & HUD typed API** — `SettingsSuite` (`get_options`, `set_option`) binds where the Options popup does and names a dropdown setting's values from the popup's own enumerations; changes stay unpersisted unless asked. `get_huds` and `set_class_huds` (in `ControlSuite`) read and set HUD visibility by body class and small-body group, `set_class_huds` binding where the HUD checkboxes do. Core gained `IVSettingsManager.get_setting_keys()` for it. These expose state by named flag, not by GUI text; `find_nodes` / `read_node_text` remain the tools for asserting that GUI text renders. `get_gui_state` from the original Phase 4 plan was dropped, superseded by the GUI inspection suite.
+- **Automation** — Any class declares what a client may read and call: `AUTOMATION_METHODS`, `AUTOMATION_PROPERTIES`, `AUTOMATION_KEY`, `is_automation_available()`, `get_automation_objects()`, and on one autoload `AUTOMATION_LIFECYCLE`. The server finds declaring objects among autoloads, named roles and the scene tree; serves `describe` (the whole context: objects, keyed classes, signatures, doc comments, enums, availability, visible widgets, actions), `get` and `call` with conversion by Godot's own type information; accepts JSON-RPC batches; and takes its lifecycle from the declaration, so it refers to no Core class. Doc comments are parsed from source, and an `EditorExportPlugin` digests them into exports. Widgets: listed and operated per Godot family (buttons through `ui_accept`, ranges, tabs, foldables, options, text), named by their accessibility properties, identified by key, composites through their own value interface, hidden ones reached through their opener. Core declares time, speed, state, settings, camera, views, selection, bodies and orbits, HUDs, small-body groups and its widgets; Units its unit constants. Suite methods that bind to Core were deprecated rather than removed (next section); `press_action`, `warp_mouse`, `screenshot`, `project_to_screen`, `list_actions` and GUI inspection became built-in Godot-level tools. `tools/assistant_test.py` and `orbit_accuracy_test.py` moved to declared members (the latter fixing a factor of 1000 since the Planetarium's `METER` became 1).
 
-## Next: Phase 4 — Settings & HUD typed API
 
-**Goal:** add typed, named accessors for user settings and HUD state, complementing the generic `find_nodes` / `inspect_node` introspection that already exists.
+## Next: Retire the deprecated suites
 
-`get_gui_state` from the original Phase 4 plan is **superseded** by the GUI inspection suite (`SPECIFICATION.md` §4.8) and is dropped. The remaining items:
+Automation (above) runs beside the old Core-bound suites, which stay, deprecated, for external projects; Astropolis is the one that calls them. When it has moved to `describe`, `get` and `call` (its `test_proxies.py` uses `get_state`, `start_game`, `set_pause`, `set_speed`, `move_camera`, the body queries and save/load):
 
-### Step 4.1: Settings
+1. Delete `StateQuerySuite`, `ControlSuite`, `ViewSuite`, `SettingsSuite`, `MouseTargetIdSuite` and `SmallBodiesIdSuite`, and the deprecated helpers they use: `IVAssistantRequirementTokens` and the server's token gating, `get_method_requirements()`, `add_project_info()`, `parse_body()`, `get_global_position()` and `ERR_BODY_NOT_FOUND`. The built-in `screenshot`, `project_to_screen` and `list_actions` then answer alone. `[API breaking]`
+2. Save/load: the Save plugin (v0.2.3) declares its own members on `IVSave` (§4.7), so `CoreTestSuite` goes with the rest. Move `tools/assistant_test.py`'s save/load step from `save_game`, `load_game` and `get_save_status` to those declarations first.
+3. Remove §4.7–4.13 and §7.5 from `SPECIFICATION.md`, and the deprecated rows of §5 and §7.2.
 
-- **`set_option`** — Change a user setting via `IVSettingsManager`.
-  - **Params:** `setting` (string, required), `value` (variant, required).
-  - **Result:** `{"ok": true, "setting": "...", "value": ...}`.
-- **`get_options`** — Read current settings as a dict (or read a single setting if `setting` param is supplied).
+Open, not blocking:
 
-### Step 4.2: HUD toggles
-
-- Toggle body labels, orbit lines, and asteroid visibility via `BodyHUDsState` / `SBGHUDsState` flags.
-- Likely shape: a single `set_huds` method that takes a dict of flag → bool, plus a `get_huds` reader. Final shape TBD when implementing.
-
-These are *typed* APIs — they expose state by named flag, not by GUI text. The generic `find_nodes` / `read_node_text` route remains the right tool for asserting that GUI text *renders* correctly; this Phase 4 is about programmatic state control.
-
-## Next: Suite B — Generic widget actuation (deferred)
-
-The write-side sibling of `GuiInspectionSuite` (`SPECIFICATION.md` §4.8 read-side). Where `find_nodes` / `inspect_node` / `read_node_text` *read* the GUI tree, Suite B would *actuate* a bounded set of `Control` widgets by node path, so an agent (or accessibility client) can drive any GUI panel without a typed Core method per control. This is the generalization of the §10 layering principle to the widget level: it binds at the `Control` surface for GUI that has no typed Core accessor.
-
-**Bounded Control vocabulary** (one method per family, or a single `set_widget` dispatching on the resolved class):
-- `Button` / `CheckBox` / `CheckButton` — press, or `set_pressed(bool)` for toggle types.
-- `TabContainer` — set `current_tab` (int).
-- `FoldableContainer` — set `folded` (bool).
-- `Range` / `SpinBox` — set `value` (float).
-- `OptionButton` — select by index / id.
-- `LineEdit` / `TextEdit` — set `text`, optionally emit submit.
-
-**Guards (the reason this is its own suite, not a quick add):**
-- Respect `disabled` and `visible` — refuse to actuate a disabled or hidden control (return an error, never silently no-op).
-- **Prefer the widget's real signal/setter over synthesizing OS input.** Emit `pressed` / call `set_pressed` / assign `value` directly (firing the widget's own `value_changed` etc.) rather than warping the mouse and faking a click — deterministic, headless-safe, and avoids the "below the GUI surface" hazard that motivated §10.
-- Resolve the target by node path (reuse `GuiInspectionSuite`'s resolution) and validate the resolved class is in-vocabulary before acting.
-- Echo the resulting state in the result (e.g. `{"ok": true, "pressed": true}`) so the client can confirm without a follow-up `inspect_node`.
-
-Does **not** replace the typed Phase 4 Settings/HUD API — typed accessors stay the right tool for named state; Suite B is for arbitrary GUI controls with no typed Core accessor. Deferred behind Phase 4 because typed accessors cover the highest-value controls first; Suite B generalizes the remainder.
+- A widget that updates itself a frame later (the focal-length spin box, a popup button) echoes its old state from `operate_widget`. Replying a frame later would fix it at the cost of a deferred response path in the server.
+- `describe` with widgets runs to ~90 KB in the Planetarium, most of it the 45 navigation buttons and the per-member doc comments; a client that needs less passes `widgets: false` or reads `list_widgets` filtered.
+- Godot-native members a class declares (`name`, `global_position`, `visible`) have no description; the class reference isn't available at runtime.
 
 ## Next: Phase 5 — Accessibility
 
@@ -74,8 +53,9 @@ Purely conceptual at this stage; no detailed API yet.
 
 ### Step 5.2: Screen reader support
 
+- Widgets name and describe themselves through their accessibility properties (in Core since the automation work); fill in the rest (data panels, popups' contents) and check what a screen reader reads.
 - Text descriptions of current view and selected body.
-- Announce state changes.
+- Announce state changes (`accessibility_live`).
 
 ### Step 5.3: Spatial audio
 

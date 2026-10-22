@@ -25,7 +25,9 @@ extends IVAssistantTestSuite
 ## [method IVViewManager.set_table_view] (see [IVViewButton]). This is the
 ## standard "frame the camera" surface — preferred over [code]move_camera[/code]
 ## (in [code]control_suite.gd[/code]), which reaches below the view layer and
-## needs a hand-built perspective-distance vector.
+## needs a hand-built perspective-distance vector.[br][br]
+##
+## @deprecated: Classes now declare these members; use describe, get and call (SPECIFICATION.md §11).
 
 var _view_manager: IVViewManager
 

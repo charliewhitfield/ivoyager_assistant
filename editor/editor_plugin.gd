@@ -20,19 +20,22 @@
 @tool
 extends EditorPlugin
 
-## EditorPlugin that registers autoloads for the I, Voyager Assistant plugin.
+## EditorPlugin that registers autoloads and the export plugin for the
+## I, Voyager Assistant plugin.
 ##
 ## Reads autoload entries from
 ## [code]res://addons/ivoyager_assistant/ivoyager_assistant.cfg[/code] (with
 ## overrides from [code]res://ivoyager_override.cfg[/code]) and registers them
 ## via [method EditorPlugin.add_autoload_singleton]. If you modify autoloads in
 ## either config, disable and re-enable the plugin for changes to take effect.
+## [IVAssistantExportPlugin] adds declared members' doc comments to exports.
 
 ## Plugins that must be enabled before this one.
 const REQUIRED_PLUGINS: Array[String] = ["ivoyager_core"]
 
 var _config: ConfigFile # with overrides
 var _autoloads: Dictionary[String, String] = {}
+var _export_plugin: IVAssistantExportPlugin
 
 
 
@@ -54,11 +57,16 @@ func _enter_tree() -> void:
 	_config = IVAssistantPluginUtils.get_ivoyager_config(
 			"res://addons/ivoyager_assistant/ivoyager_assistant.cfg")
 	_add_autoloads()
+	_export_plugin = IVAssistantExportPlugin.new()
+	add_export_plugin(_export_plugin)
 
 
 func _exit_tree() -> void:
 	print("Removing I, Voyager - Assistant (plugin)")
 	_remove_autoloads()
+	if _export_plugin:
+		remove_export_plugin(_export_plugin)
+		_export_plugin = null
 	_config = null
 
 

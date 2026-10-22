@@ -22,15 +22,19 @@ extends RefCounted
 
 ## Base class for test suites that extend [IVAssistantServer]'s API.
 ##
-## Subclass this and register via the [code][assistant_test_suites][/code]
-## config section. See SPECIFICATION.md for details.
+## A suite holds helpers specific to one project; what a class offers any
+## client it declares itself (SPECIFICATION.md §11). Subclass this and register
+## via the [code][assistant_test_suites][/code] config section. See
+## SPECIFICATION.md §7.2.
 
 # Error codes (shared with IVAssistantServer)
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2
-const ERR_BODY_NOT_FOUND := 3
+const ERR_NOT_FOUND := 3
 const ERR_NOT_STARTED := 4
 const ERR_NOT_ALLOWED := 5
+## @deprecated: Use [constant ERR_NOT_FOUND], the same code.
+const ERR_BODY_NOT_FOUND := ERR_NOT_FOUND
 
 var _server: Node # IVAssistantServer (autoload, no class_name)
 
@@ -40,12 +44,12 @@ func _init_test_suite(server: Node) -> void:
 	_server = server
 
 
-## Called on [code]simulator_started[/code] — cache program references here.
+## Called on the project's lifecycle "started" signal (SPECIFICATION.md §11.6).
 func _on_simulator_started() -> void:
 	pass
 
 
-## Called on [code]about_to_free_procedural_nodes[/code] — clear references.
+## Called on the project's lifecycle "stopping" signal — clear references.
 func _on_about_to_free() -> void:
 	pass
 
@@ -58,44 +62,46 @@ func get_method_names() -> Array[String]:
 ## Return capability strings for [code]get_project_info[/code]. Most suites can
 ## leave this empty: the server already advertises every active (non-gated)
 ## method name in [code]capabilities[/code]. Override only to add feature-group
-## identifiers (e.g. [code]"mouse_hover"[/code]) that aren't method names.
+## identifiers (e.g. [code]"mouse_target_id"[/code]) that aren't method names.
 func get_capabilities() -> Array[String]:
 	return []
 
 
-## Per-method requirement tokens. Map<method_name, Array[String]>.
-##
-## Methods absent from the returned dict are unconditionally available. Methods
-## listed with one or more tokens are dropped from the dispatch table (and
-## reported under [code]gated_out[/code] in [code]get_project_info[/code]) when
-## any token resolves false at load time or at simulator start.
-##
-## Token vocabulary is defined by [code]IVAssistantServer.KNOWN_TOKENS[/code];
-## unknown tokens [code]push_error[/code] at suite load. See SPECIFICATION.md
-## §7.5 for the canonical list and resolution rules.
-func get_method_requirements() -> Dictionary:
-	return {}
-
-
-## Optional human-readable summaries for the v2 manifest. Map<method_name,
-## String>. Surfaces in [code]get_project_info[/code]'s [code]methods[/code]
-## map. Methods absent from the dict get an empty summary.
+## Optional human-readable summaries. Map<method_name, String>. Surfaces in
+## [code]get_project_info[/code]'s [code]methods[/code] map. Methods absent
+## from the dict get an empty summary.
 func get_method_summaries() -> Dictionary:
 	return {}
 
 
+## Per-method requirement tokens. Map<method_name, Array[String]>, from the
+## vocabulary of [IVAssistantRequirementTokens] (SPECIFICATION.md §7.5).
+## A method with an unmet token is left out of dispatch and reported under
+## [code]gated_out[/code] in [code]get_project_info[/code]. Tokens are
+## evaluated when the suite loads and again on the lifecycle "started" signal.
+##
+## @deprecated: A class gates its own members in is_automation_available() (SPECIFICATION.md §11).
+func get_method_requirements() -> Dictionary:
+	return {}
+
+
+## Adds fields to [code]get_project_info[/code]'s result.
+##
+## @deprecated: Clients read project state from declared properties (SPECIFICATION.md §11).
+func add_project_info(_info: Dictionary) -> void:
+	pass
+
+
 ## Return false to opt this whole suite out of registration. Default true.
-## Use for all-or-nothing dependencies that don't fit the per-method
-## requirement vocabulary (e.g. an asteroid-only suite checking
-## [code]&"asteroids" in IVCoreSettings.body_tables[/code]). Called once after
-## [method _init_test_suite] and before methods are registered.
+## Called once after [method _init_test_suite], when the project's lifecycle
+## "initialized" signal fires, and before methods are registered.
 func is_applicable() -> bool:
 	return true
 
 
-## Whether this suite's methods require the simulator to be started.
-## If true, the server returns ERR_NOT_STARTED automatically when the sim
-## is not running. If false, the suite handles the check internally.
+## Whether this suite's methods wait for the readiness gate (SPECIFICATION.md §7.4).
+## If true, the server returns ERR_NOT_STARTED automatically until it opens.
+## If false, the suite handles the check internally.
 func requires_sim_started() -> bool:
 	return true
 
@@ -105,6 +111,21 @@ func requires_sim_started() -> bool:
 func dispatch(_method: String, _params: Dictionary) -> Variant:
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Method not implemented"}}
+
+
+## Returns the object a client's [param address] names (SPECIFICATION.md §11.3),
+## or null; [method get_resolve_error] then says why.
+func resolve(address: Variant) -> Object:
+	@warning_ignore("unsafe_method_access")
+	var automation: IVAssistantAutomation = _server.get_automation()
+	return automation.resolve(address)
+
+
+## Why the last [method resolve] failed.
+func get_resolve_error() -> String:
+	@warning_ignore("unsafe_method_access")
+	var automation: IVAssistantAutomation = _server.get_automation()
+	return automation.error
 
 
 # ===========================================================================
@@ -135,6 +156,8 @@ static func parse_vector3(value: Variant, param_name: String) -> Variant:
 ## Parses a required body-name param into an [IVBody]. Returns the body on
 ## success or an [code]_error[/code] [Dictionary] on failure. [param param_name]
 ## is used in error messages.
+##
+## @deprecated: A declared method takes an IVBody parameter by its key (SPECIFICATION.md §11.4).
 static func parse_body(value: Variant, param_name: String) -> Variant:
 	if typeof(value) != TYPE_STRING or value == "":
 		return {"_error": {"code": ERR_INVALID_PARAMS,
@@ -142,13 +165,15 @@ static func parse_body(value: Variant, param_name: String) -> Variant:
 	var name_str: String = value
 	var sn := StringName(name_str)
 	if !IVBody.bodies.has(sn):
-		return {"_error": {"code": ERR_BODY_NOT_FOUND,
+		return {"_error": {"code": ERR_NOT_FOUND,
 				"message": "Body not found: %s" % name_str}}
 	return IVBody.bodies[sn]
 
 
 ## Returns [param body]'s position summed up the parent chain at [param time]
 ## (in heliocentric coordinates for solar-system bodies).
+##
+## @deprecated: Kept for the deprecated Core suites.
 static func get_global_position(body: IVBody, time: float) -> Vector3:
 	var pos := Vector3.ZERO
 	var current: IVBody = body
@@ -161,7 +186,7 @@ static func get_global_position(body: IVBody, time: float) -> Vector3:
 
 ## Converts a [param position] in [param viewport]'s 2D coordinates (a mouse position,
 ## or a [method Camera3D.unproject_position] result) to window pixels, the pixels of a
-## screenshot and of a synthesized mouse event. The Core plugin's display scale makes
+## screenshot and of a synthesized mouse event. A project's display scale makes
 ## the two differ; report window pixels to clients.
 static func to_window_pixels(viewport: Viewport, position: Vector2) -> Vector2:
 	return viewport.get_final_transform() * position

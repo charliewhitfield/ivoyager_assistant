@@ -19,8 +19,13 @@
 # *****************************************************************************
 extends IVAssistantTestSuite
 
-## Navigation, speed, pause, camera, GUI, action emulation, and body-HUD
-## visibility methods for [IVAssistantServer].
+## Navigation, speed, pause, camera, GUI, action listing, and HUD visibility
+## methods for [IVAssistantServer].[br][br]
+##
+## [code]list_actions[/code] here, with display names, replaces the built-in
+## one while this suite is loaded.
+##
+## @deprecated: Classes now declare these members; use describe, get and call (SPECIFICATION.md §11).
 
 var _selection_manager: IVSelectionManager
 var _speed_manager: IVSpeedManager
@@ -54,9 +59,9 @@ func get_method_names() -> Array[String]:
 	return [
 		"select_body", "select_navigate", "set_pause", "set_speed",
 		"set_time", "move_camera", "set_camera_fov", "show_hide_gui",
-		"list_actions", "press_action",
+		"list_actions",
 		"set_all_body_orbits_visibility", "set_body_orbit_visible_flags",
-		"set_huds",
+		"set_huds", "get_huds", "set_class_huds",
 	]
 
 
@@ -70,6 +75,8 @@ func get_method_requirements() -> Dictionary:
 		"set_all_body_orbits_visibility": ["program.BodyHUDsState"],
 		"set_body_orbit_visible_flags": ["program.BodyHUDsState"],
 		"set_huds": ["program.BodyHUDsState"],
+		"get_huds": ["program.BodyHUDsState"],
+		"set_class_huds": ["program.BodyHUDsState"],
 	}
 
 
@@ -93,14 +100,16 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _show_hide_gui(params)
 		"list_actions":
 			return _list_actions()
-		"press_action":
-			return _press_action(params)
 		"set_all_body_orbits_visibility":
 			return _set_all_body_orbits_visibility(params)
 		"set_body_orbit_visible_flags":
 			return _set_body_orbit_visible_flags(params)
 		"set_huds":
 			return _set_huds(params)
+		"get_huds":
+			return _get_huds()
+		"set_class_huds":
+			return _set_class_huds(params)
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Unknown method: %s" % method}}
 
@@ -482,28 +491,22 @@ func _set_body_orbit_visible_flags(params: Dictionary) -> Variant:
 	}
 
 
-# Sets every 3D HUD overlay at once, absolutely rather than by toggling: orbit lines,
-# names and symbols, plus the small-body point groups when that system is present. An
-# evaluation screenshot needs a frame with nothing drawn over the subject, and a hotkey
-# toggle cannot promise one - its result depends on the state it found. Returns the
-# resulting flags so the caller can confirm rather than assume.
+# Hides or shows every 3D HUD at once, absolutely rather than by toggling, through the GUI's
+# hide-HUDs path. An evaluation screenshot needs a frame with nothing drawn over the
+# subject, and a hotkey toggle cannot promise one - its result depends on the state it
+# found. Hiding this way leaves the visibility flags alone and is not persisted, so a test
+# run can't carry hidden HUDs into the user's next session.
 func _set_huds(params: Dictionary) -> Variant:
 	var visible_var: Variant = params.get("visible")
 	if typeof(visible_var) != TYPE_BOOL:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "Missing or invalid 'visible' parameter (must be bool)"}}
 	var visible: bool = visible_var
-	if visible:
-		_body_huds_state.set_default_visibilities()
-		if _sbg_huds_state:
-			_sbg_huds_state.set_default_visibilities()
-	else:
-		_body_huds_state.hide_all()
-		if _sbg_huds_state:
-			_sbg_huds_state.hide_all()
+	_body_huds_state.set_huds_hidden(!visible)
 	return {
 		"ok": true,
 		"visible": visible,
+		"huds_hidden": _body_huds_state.huds_hidden,
 		"orbit_visible_flags": _body_huds_state.orbit_visible_flags,
 		"name_visible_flags": _body_huds_state.name_visible_flags,
 		"symbol_visible_flags": _body_huds_state.symbol_visible_flags,
@@ -511,35 +514,180 @@ func _set_huds(params: Dictionary) -> Variant:
 	}
 
 
-func _press_action(params: Dictionary) -> Dictionary:
-	var action_var: Variant = params.get("action")
-	if typeof(action_var) != TYPE_STRING or action_var == "":
+# Each HUD's visibility setting by body class and small-body group, the state the
+# GUI's HUD checkboxes show, plus the raw flags the per-flag setters take back.
+func _get_huds() -> Dictionary:
+	var body_classes := {}
+	var class_flags := _get_body_class_flags()
+	for body_class in class_flags:
+		var flag := class_flags[body_class]
+		body_classes[body_class] = {
+			"names": _body_huds_state.is_name_visible(flag),
+			"symbols": _body_huds_state.is_symbol_visible(flag),
+			"orbits": _body_huds_state.is_orbit_visible(flag),
+		}
+	var result := {
+		"huds_hidden": _body_huds_state.huds_hidden,
+		"body_classes": body_classes,
+		"name_visible_flags": _body_huds_state.name_visible_flags,
+		"symbol_visible_flags": _body_huds_state.symbol_visible_flags,
+		"orbit_visible_flags": _body_huds_state.orbit_visible_flags,
+		"all_flags": _body_huds_state.all_flags,
+	}
+	if !_sbg_huds_state:
+		return result
+	var groups := {}
+	for sbg_name: StringName in IVSmallBodiesGroup.small_bodies_groups:
+		var sbg: IVSmallBodiesGroup = IVSmallBodiesGroup.small_bodies_groups[sbg_name]
+		groups[String(sbg_name)] = {
+			"alias": String(sbg.sbg_alias),
+			"symbols": _sbg_huds_state.is_symbols_visible(sbg.sbg_alias),
+			"orbits": _sbg_huds_state.is_orbits_visible(sbg.sbg_alias),
+		}
+	result["small_body_groups"] = groups
+	return result
+
+
+# One HUD for a set of body classes or small-body groups, bound where the GUI's HUD
+# checkboxes are (IVHUDsCheckBox), so a class is shown or hidden exactly as a user's
+# click does it.
+func _set_class_huds(params: Dictionary) -> Variant:
+	var hud_var: Variant = params.get("hud")
+	if typeof(hud_var) != TYPE_STRING or !["names", "symbols", "orbits"].has(hud_var):
 		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "Missing or invalid 'action' parameter"}}
-
-	var action: String = action_var
-	var sn := StringName(action)
-	if !InputMap.has_action(sn):
+				"message": "'hud' must be 'names', 'symbols' or 'orbits'"}}
+	var hud: String = hud_var
+	var visible_var: Variant = params.get("visible")
+	if typeof(visible_var) != TYPE_BOOL:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "Unknown action: %s" % action}}
-
-	var events := InputMap.action_get_events(sn)
-	var key_event: InputEventKey
-	for event: InputEvent in events:
-		if event is InputEventKey:
-			key_event = event
-			break
-
-	if !key_event:
+				"message": "Missing or invalid 'visible' parameter (must be bool)"}}
+	var visible: bool = visible_var
+	var body_classes_var: Variant = params.get("body_classes")
+	var groups_var: Variant = params.get("groups")
+	if (body_classes_var == null) == (groups_var == null):
 		return {"_error": {"code": ERR_INVALID_PARAMS,
-				"message": "Action '%s' has no key binding" % action}}
+				"message": "Supply exactly one of 'body_classes' or 'groups'"}}
+	var is_body_classes := body_classes_var != null
+	var names_or_err: Variant = _parse_names(body_classes_var if is_body_classes else groups_var,
+			"body_classes" if is_body_classes else "groups")
+	if names_or_err is Dictionary:
+		return names_or_err
+	var names: Array[String] = names_or_err
+	var previous: Dictionary
+	if is_body_classes:
+		previous = _set_body_class_huds(hud, names, visible)
+	else:
+		previous = _set_group_huds(hud, names, visible)
+	if previous.has("_error"):
+		return previous
+	return {
+		"ok": true,
+		"hud": hud,
+		"visible": visible,
+		"previous": previous,
+		"huds_hidden": _body_huds_state.huds_hidden,
+	}
 
-	var press: InputEventKey = key_event.duplicate()
-	press.pressed = true
-	Input.parse_input_event(press)
 
-	var release: InputEventKey = key_event.duplicate()
-	release.pressed = false
-	Input.parse_input_event(release)
+# Returns each class's previous visibility, or an _error Dictionary.
+func _set_body_class_huds(hud: String, names: Array[String], visible: bool) -> Dictionary:
+	var class_flags := _get_body_class_flags()
+	var body_flags := 0
+	var previous := {}
+	for body_class_name in names:
+		var body_class := body_class_name.trim_prefix("BODYFLAGS_")
+		if !class_flags.has(body_class):
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "Unknown body class: %s (classes: %s)"
+					% [body_class_name, ", ".join(class_flags.keys())]}}
+		var flag := class_flags[body_class]
+		body_flags |= flag
+		match hud:
+			"names":
+				previous[body_class] = _body_huds_state.is_name_visible(flag)
+			"symbols":
+				previous[body_class] = _body_huds_state.is_symbol_visible(flag)
+			"orbits":
+				previous[body_class] = _body_huds_state.is_orbit_visible(flag)
+	match hud:
+		"names":
+			_body_huds_state.set_name_visibility(body_flags, visible)
+		"symbols":
+			_body_huds_state.set_symbol_visibility(body_flags, visible)
+		"orbits":
+			_body_huds_state.set_orbit_visibility(body_flags, visible)
+	return previous
 
-	return {"ok": true, "action": action}
+
+# Returns each group's previous visibility, or an _error Dictionary. Takes a group's
+# name or its alias.
+func _set_group_huds(hud: String, names: Array[String], visible: bool) -> Dictionary:
+	if !_sbg_huds_state:
+		return {"_error": {"code": ERR_NOT_ALLOWED,
+				"message": "This project has no small-body HUDs"}}
+	if hud == "names":
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "Small-body groups have no names HUD"}}
+	var aliases: Array[StringName] = []
+	var previous := {}
+	for group_name in names:
+		var sbg := _find_small_bodies_group(group_name)
+		if !sbg:
+			return {"_error": {"code": ERR_BODY_NOT_FOUND,
+					"message": "Small bodies group not found: %s" % group_name}}
+		aliases.append(sbg.sbg_alias)
+		if hud == "symbols":
+			previous[String(sbg.name)] = _sbg_huds_state.is_symbols_visible(sbg.sbg_alias)
+		else:
+			previous[String(sbg.name)] = _sbg_huds_state.is_orbits_visible(sbg.sbg_alias)
+	if hud == "symbols":
+		_sbg_huds_state.set_visible_symbols_groups(aliases, visible)
+	else:
+		_sbg_huds_state.set_visible_orbits_groups(aliases, visible)
+	return previous
+
+
+# The single body flags a HUD checkbox can each set (visual_groups.tsv), keyed by their
+# IVBody.BodyFlags name without its prefix.
+func _get_body_class_flags() -> Dictionary[String, int]:
+	var body_flags_enum: Dictionary = IVBody.BodyFlags
+	var class_flags: Dictionary[String, int] = {}
+	var flags := _body_huds_state.all_flags
+	var flag := 1
+	while flags:
+		if flags & 1:
+			var key: Variant = body_flags_enum.find_key(flag)
+			class_flags[str(key).trim_prefix("BODYFLAGS_")] = flag
+		flag <<= 1
+		flags >>= 1
+	return class_flags
+
+
+func _find_small_bodies_group(group_name: String) -> IVSmallBodiesGroup:
+	var key := StringName(group_name)
+	if IVSmallBodiesGroup.small_bodies_groups.has(key):
+		return IVSmallBodiesGroup.small_bodies_groups[key]
+	for sbg: IVSmallBodiesGroup in IVSmallBodiesGroup.small_bodies_groups.values():
+		if sbg.sbg_alias == key:
+			return sbg
+	return null
+
+
+# Accepts one name or an array of them; returns Array[String] or an _error Dictionary.
+func _parse_names(value: Variant, param_name: String) -> Variant:
+	var names: Array[String] = []
+	if typeof(value) == TYPE_STRING:
+		var single_name: String = value
+		names.append(single_name)
+	elif typeof(value) == TYPE_ARRAY:
+		var array: Array = value
+		for item: Variant in array:
+			if typeof(item) != TYPE_STRING:
+				names.clear()
+				break
+			var item_name: String = item
+			names.append(item_name)
+	if names.is_empty() or names.has(""):
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "'%s' must be a name or a non-empty array of names" % param_name}}
+	return names
