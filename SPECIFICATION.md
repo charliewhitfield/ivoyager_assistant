@@ -172,7 +172,7 @@ Calls one declared method.
 - `method` (string, required) — A declared method.
 - `args` (object or array, optional) — Arguments by name (`{"new_speed_index": 3}`) or by position (`[3]`). An argument with a default may be omitted; an omitted argument before a given one takes its declared default.
 
-**Result:** the method's return value as JSON; `null` for a method that returns nothing.
+**Result:** the method's return value as JSON; `null` for a method that returns nothing. A coroutine (a method that awaits, such as `IVSave.save_file`) answers `null` at its first `await` and finishes later; its description names what to poll.
 
 Errors: an unknown address is code 3 (an ambiguous one code 2, listing the candidates); a member the object doesn't declare, code 1; a member its class says is not available now (§11.1), code 5; an argument that doesn't convert, code 2, naming it.
 
@@ -434,7 +434,9 @@ The default suites below bind to Core classes and predate §11. Core's classes n
 | `project_to_screen` with `body` | `project_to_screen` with `node` and `offset` (§4.5) |
 | `get_hover_target` | `get` `IVMouseTargetLabel` (`text`, `visible`) |
 | `list_small_body_groups`, `project_small_body_to_screen`, `set_small_body_points_visibility` | `describe`'s `IVSmallBodiesGroup` instances and their declared members; `SBGHUDsState.change_symbols_visibility` |
-| `save_game`, `load_game`, `get_save_status` | No replacement yet: the Save plugin declares no members. These stay until it does. |
+| `save_game` | `call` `IVSave.quicksave`, `autosave`, or `save_file` with `save_type` and `path`; poll `get` `IVSave.is_saving` |
+| `load_game` | `call` `IVSave.quickload`, or `load_file` with `path`; poll `get` `IVSave.is_loading`, then `IVStateManager.started` |
+| `get_save_status` | `get` `IVSave` (`is_saving`, `is_loading`, `directory`, `file_extension`); `call` `has_file`, `get_last_modified_file_path` with the directory |
 
 `press_action`, `warp_mouse` and the GUI inspection methods were in these suites and are now built in, unchanged (§4.5, §4.6).
 
@@ -886,7 +888,7 @@ An unknown setting, or a value that doesn't fit its type or enumeration, returns
 
 ### 4.12 Deprecated: State, Start, Screenshot and Save/Load (`CoreTestSuite`)
 
-Deprecated (§4.7). Also adds `ok_to_start`, `wait_for_start` and `allow_time_setting` to `get_project_info`. Save/load has no replacement yet: these stay until the Save plugin declares its own members.
+Deprecated (§4.7). Also adds `ok_to_start`, `wait_for_start` and `allow_time_setting` to `get_project_info`. Save/load is replaced by the Save plugin's own declarations on `IVSave` (§4.7).
 
 #### `get_state`
 Returns overall simulation state. If the Save plugin is present, includes `is_saving` and `is_loading` fields.
@@ -1332,6 +1334,7 @@ Declaring a member below that surface is a deliberate, marked exception, and its
 | HUD visibility, bulk or raw | — (the checkboxes set one class or group) | `IVBodyHUDsState` `set_all_orbits_visibility` / `set_orbit_visible_flags`; `IVSBGHUDsState.change_symbols_visibility` — **beside the widget layer, a marked exception** |
 | Show / hide GUI | `ui_widgets/hide_gui_button.gd`, `show_gui_button.gd` | `IVShowHideUI.show_hide_gui` |
 | User settings | `ui/options_popup.gd` (`IVOptionsPopup`) | `IVSettingsManager.change_setting`; `cache_now` on Confirm |
+| Save / load (Save plugin) | `gui/quicksave_button.gd`, `quickload_button.gd`, `save_dialog.gd`, `load_dialog.gd` | `IVSave.quicksave`, `quickload`, `save_file`, `load_file` |
 
 A class that adds a write-side member should add a row here and declare it at the widget level.
 

@@ -31,7 +31,7 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
 Automation (above) runs beside the old Core-bound suites, which stay, deprecated, for external projects; Astropolis is the one that calls them. When it has moved to `describe`, `get` and `call` (its `test_proxies.py` uses `get_state`, `start_game`, `set_pause`, `set_speed`, `move_camera`, the body queries and save/load):
 
 1. Delete `StateQuerySuite`, `ControlSuite`, `ViewSuite`, `SettingsSuite`, `MouseTargetIdSuite` and `SmallBodiesIdSuite`, and the deprecated helpers they use: `IVAssistantRequirementTokens` and the server's token gating, `get_method_requirements()`, `add_project_info()`, `parse_body()`, `get_global_position()` and `ERR_BODY_NOT_FOUND`. The built-in `screenshot`, `project_to_screen` and `list_actions` then answer alone. `[API breaking]`
-2. Save/load: the Save plugin declares its own members (`IVSave.quicksave`, `quickload`, `save_file`, `load_file`, `is_saving`, `is_loading`, ...), and `CoreTestSuite` goes with the rest. Until then it is the only home of `save_game`, `load_game` and `get_save_status`.
+2. Save/load: the Save plugin (v0.2.3) declares its own members on `IVSave` (§4.7), so `CoreTestSuite` goes with the rest. Move `tools/assistant_test.py`'s save/load step from `save_game`, `load_game` and `get_save_status` to those declarations first.
 3. Remove §4.7–4.13 and §7.5 from `SPECIFICATION.md`, and the deprecated rows of §5 and §7.2.
 
 Open, not blocking:

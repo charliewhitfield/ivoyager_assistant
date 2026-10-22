@@ -227,6 +227,12 @@ func call_method(params: Dictionary) -> Variant:
 		return _error(ERR_INVALID_PARAMS, "%s.%s: %s" % [declaration.class_name_, method, message])
 	var arg_values: Array = args
 	var result: Variant = object.callv(method, arg_values)
+	if typeof(result) == TYPE_OBJECT and is_instance_valid(result):
+		var result_object: Object = result
+		# A coroutine hands back its suspended state at its first await, not a
+		# value; the method finishes later.
+		if result_object.get_class() == "GDScriptFunctionState":
+			return null
 	var return_info: Dictionary = info.get("return", {})
 	return converter.to_json(result, return_info)
 
