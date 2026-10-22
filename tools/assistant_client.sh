@@ -5,11 +5,11 @@
 #   ./assistant_client.sh <method> [params_json]
 #
 # Examples:
-#   ./assistant_client.sh get_state
-#   ./assistant_client.sh list_bodies '{"filter":"planets"}'
-#   ./assistant_client.sh select_body '{"name":"PLANET_MARS"}'
-#   ./assistant_client.sh set_speed '{"index":3}'
-#   ./assistant_client.sh set_pause '{"paused":true}'
+#   ./assistant_client.sh get_project_info
+#   ./assistant_client.sh describe '{"widgets":false}'
+#   ./assistant_client.sh get '{"object":"IVStateManager","properties":["started","paused_by_user"]}'
+#   ./assistant_client.sh call '{"object":"SelectionManager","method":"select_by_name","args":{"name":"PLANET_MARS"}}'
+#   ./assistant_client.sh call '{"object":"IVStateManager","method":"set_user_paused","args":{"pause":true}}'
 #   ./assistant_client.sh quit '{"force":true}'
 #
 # Environment variables:
@@ -23,8 +23,8 @@ PORT="${ASSISTANT_PORT:-29071}"
 
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <method> [params_json]" >&2
-    echo "  e.g. $0 get_state" >&2
-    echo "  e.g. $0 select_body '{\"name\":\"PLANET_MARS\"}'" >&2
+    echo "  e.g. $0 get_project_info" >&2
+    echo "  e.g. $0 get '{\"object\":\"IVStateManager\",\"properties\":\"started\"}'" >&2
     exit 1
 fi
 

@@ -16,19 +16,15 @@ Under development using Godot 4.7.2.
 * `IVAssistantExportPlugin`, which adds declared members' doc comments to an export for `describe` to report.
 * Built-in method `get_mouse_position`; `screenshot` takes `redraw`, and `project_to_screen` a `node` address with an `offset`.
 * `AssistantClient` in `tools/assistant_test.py` has `describe()`, `get()`, `invoke()` and `batch()`, raising `AssistantError` on an error response.
-* New SettingsSuite with `get_options` and `set_option`, which read and change user settings as the Options popup does, naming a dropdown setting's values; a change is not written to the settings file unless `persist` is given. See SPECIFICATION.md §4.11.
-* Methods `get_huds`, which reads every HUD's visibility by body class and small-body group, and `set_class_huds`, which sets one HUD for chosen classes or groups as the GUI's HUD checkboxes do, in the control suite.
 
 ### Changed
-* The server takes its lifecycle signals and quit from an autoload's `AUTOMATION_LIFECYCLE` declaration and refers to no Core class; `get_project_info` reports protocol version 4 and `ready`. `get_state`, `start_game` and the Core fields of `get_project_info` moved to `CoreTestSuite`, and the requirement tokens to `IVAssistantRequirementTokens`.
-* `press_action`, `warp_mouse`, `list_actions`, `project_to_screen`, `screenshot` and the GUI inspection methods (formerly `GuiInspectionSuite`) are built in, needing only Godot. A deprecated suite that keeps its own parameters for one of them (`screenshot`'s `hide_gui`, `project_to_screen`'s `body`) hands the rest to the built-in.
-* `tools/assistant_test.py` tests through declared members, batches and widgets; save/load keeps the deprecated methods.
-* [API breaking] `set_huds` hides and shows the HUDs as the GUI's hide-HUDs button does (`IVBodyHUDsState.set_huds_hidden`), so `{"visible": true}` restores what was on screen rather than each system's defaults, hidden HUDs no longer carry into the user's next session, and the result adds `huds_hidden`. To set HUD visibility to a known state, apply a view that sets it.
+* The server takes its lifecycle signals and quit from an autoload's `AUTOMATION_LIFECYCLE` declaration and refers to no Core class; `get_project_info` reports protocol version 5 and `ready`.
+* `press_action`, `warp_mouse`, `list_actions`, `project_to_screen`, `screenshot` and the GUI inspection methods (formerly `GuiInspectionSuite`) are built in, needing only Godot.
+* `tools/assistant_test.py` tests through declared members, batches and widgets, and saves and loads through the Save plugin's `IVSave`.
 * `GodotLauncher` in `tools/assistant_test.py` holds each launched Godot to one logical processor of each core on Windows, which can otherwise put the busy threads of instances run at once two to a core; `one_per_core=False` leaves it unpinned. See SPECIFICATION.md §7.3.
-* SPECIFICATION.md, CODING_PLAN.md and README.md are brought up to date with the code: methods they omitted (`set_camera_fov`, the cached-view, HUD-visibility and small-body methods) are documented, and stale suite names, result fields and §10's list of layering exceptions are corrected.
 
-### Deprecated
-* The default suites that bind to Core (`StateQuerySuite`, `ControlSuite`, `ViewSuite`, `SettingsSuite`, `CoreTestSuite`, `MouseTargetIdSuite`, `SmallBodiesIdSuite`), their requirement tokens and `get_method_requirements()`, `add_project_info()`, and `IVAssistantTestSuite.parse_body()` and `get_global_position()`. They remain for projects that haven't moved; SPECIFICATION.md §4.7 maps each method to its replacement.
+### Removed
+* [API breaking] Suites: `IVAssistantTestSuite`, the `[assistant_test_suites]` config section and the default suites that bound to Core (`StateQuerySuite`, `ControlSuite`, `ViewSuite`, `SettingsSuite`, `CoreTestSuite`, `MouseTargetIdSuite`, `SmallBodiesIdSuite`), with their methods, requirement tokens and error code 4, and `get_project_info`'s `methods` and `gated_out`. A project's own helpers declare automation members instead (SPECIFICATION.md §7.2), and §4.7 maps each removed method to its replacement.
 
 ### Fixed
 * `tools/orbit_accuracy_test.py` compared simulator positions with Horizons kilometers unconverted, off by a factor of 1000 since the Planetarium's `METER` became 1; it converts by the declared `IVUnits.KM`.
