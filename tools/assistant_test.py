@@ -857,8 +857,7 @@ class TestRunner:
                 self.client.invoke("SBGHUDsState", "change_symbols_visibility", group=alias,
                                    is_show=previous)
 
-    # 9.3 Step 5: Save/load cycle. The Save plugin declares no members yet, so this
-    # uses the deprecated save methods (SPECIFICATION.md section 4.12).
+    # 9.3 Step 5: Save/load cycle, through the Save plugin's declared IVSave members
     def test_5_save_load(self):
         print("[5. Save/load cycle]")
 
@@ -866,52 +865,44 @@ class TestRunner:
             self.skip("save/load skipped (--skip-save)")
             return
 
-        has_save = self.has_cap("save_game") and self.has_cap("load_game")
-        if not has_save:
-            self.skip("save_game/load_game not in capabilities")
+        self.refresh()
+        if not (self.has_member("IVSave", "quicksave") and self.has_member("IVSave", "quickload")):
+            self.skip("IVSave.quicksave and quickload not declared or not available")
             return
 
-        def get_state():
-            return self.client.call("get_state").get("result", {})
+        def is_saving():
+            return self.client.get("IVSave", "is_saving")["is_saving"]
 
         # Save
-        resp = self.client.call("save_game", {"type": "quicksave"})
-        result = resp.get("result", {})
-        self.assert_true(result.get("ok", False), "save_game: quicksave initiated")
-
-        # Poll until save completes
-        state = self.poll(lambda: (lambda s: s if not s.get("is_saving", True) else None)(
-            get_state()), "Save completed", timeout=30)
-        if not state:
+        self.client.invoke("IVSave", "quicksave")
+        self.assert_true(True, "IVSave.quicksave: called")
+        if not self.poll(lambda: not is_saving(), "Save completed", timeout=30):
             return
+        self.assert_true(True, "IVSave.quicksave: completed")
 
-        self.assert_true(True, "save_game: completed")
-
-        # Verify save exists
-        if self.has_cap("get_save_status"):
-            resp = self.client.call("get_save_status")
-            result = resp.get("result", {})
-            self.assert_true(result.get("has_saves", False), "get_save_status: has saves")
+        # Verify a save exists
+        directory = self.client.get("IVSave", "directory")["directory"]
+        last_path = self.client.invoke("IVSave", "get_last_modified_file_path",
+                                       dir_path=directory)
+        self.assert_true(bool(last_path), "IVSave: last save %s" % last_path)
 
         # Load
-        resp = self.client.call("load_game")
-        result = resp.get("result", {})
-        self.assert_true(result.get("ok", False), "load_game: quickload initiated")
+        self.client.invoke("IVSave", "quickload")
+        self.assert_true(True, "IVSave.quickload: called")
 
         # Poll until load completes and sim restarts
-        state = self.poll(lambda: (lambda s: s if not s.get("is_loading", True)
-                                   and s.get("started", False) else None)(get_state()),
-                          "Load completed and simulator restarted", timeout=30)
-        if not state:
-            return
+        def is_loaded():
+            loading = self.client.get("IVSave", "is_loading")["is_loading"]
+            return not loading and self.client.get("IVStateManager", "started")["started"]
 
-        self.assert_true(True, "load_game: completed and restarted")
+        if not self.poll(is_loaded, "Load completed and simulator restarted", timeout=30):
+            return
+        self.assert_true(True, "IVSave.quickload: completed and restarted")
 
         # Verify state is sane after load
-        result = get_state()
-        self.assert_true(result.get("started", False), "Post-load: started")
-        self.assert_eq(result.get("is_saving", True), False, "Post-load: not saving")
-        self.assert_eq(result.get("is_loading", True), False, "Post-load: not loading")
+        self.assert_eq(is_saving(), False, "Post-load: not saving")
+        self.assert_eq(self.client.get("IVSave", "is_loading")["is_loading"], False,
+                       "Post-load: not loading")
 
 
 # =============================================================================

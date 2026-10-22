@@ -18,7 +18,7 @@
 # limitations under the License.
 # *****************************************************************************
 class_name IVAssistantGodotTools
-extends IVAssistantTestSuite
+extends RefCounted
 
 ## Built-in tools that need only Godot: screenshots, the mouse, input actions,
 ## projection to the screen and scene-tree inspection.
@@ -26,6 +26,15 @@ extends IVAssistantTestSuite
 ## Positions are window pixels, the pixels of a screenshot and of a synthesized
 ## mouse event; a project's display scale makes them finer than the GUI's.
 ## See SPECIFICATION.md §4.4 to §4.6.
+
+## The methods these tools handle, by their protocol names.
+const METHODS: Array[String] = ["screenshot", "warp_mouse", "get_mouse_position",
+		"project_to_screen", "list_actions", "press_action", "find_nodes", "inspect_node",
+		"read_node_text"]
+
+const ERR_UNKNOWN_METHOD := 1
+const ERR_INVALID_PARAMS := 2
+const ERR_NOT_FOUND := 3
 
 ## Maximum number of nodes returned by [code]find_nodes[/code].
 const MAX_FIND_RESULTS := 50
@@ -36,20 +45,17 @@ const DEFAULT_INSPECT_DEPTH := 2
 ## [code]max_labels[/code] is not specified.
 const DEFAULT_MAX_LABELS := 200
 
-
-func get_method_names() -> Array[String]:
-	return ["screenshot", "warp_mouse", "get_mouse_position", "project_to_screen",
-			"list_actions", "press_action", "find_nodes", "inspect_node", "read_node_text"]
+var _tree: SceneTree
+var _automation: IVAssistantAutomation
 
 
-func get_capabilities() -> Array[String]:
-	return ["gui_inspection", "mouse_target_id"]
+func _init(tree: SceneTree, automation: IVAssistantAutomation) -> void:
+	_tree = tree
+	_automation = automation
 
 
-func requires_sim_started() -> bool:
-	return false
-
-
+## Handles one of [constant METHODS]. Returns its result, or an
+## [code]_error[/code] Dictionary.
 func dispatch(method: String, params: Dictionary) -> Variant:
 	match method:
 		"screenshot":
@@ -61,7 +67,7 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 		"project_to_screen":
 			return _project_to_screen(params)
 		"list_actions":
-			return _list_actions(params)
+			return list_actions(params)
 		"press_action":
 			return _press_action(params)
 		"find_nodes":
@@ -72,6 +78,23 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 			return _read_node_text(params)
 	return {"_error": {"code": ERR_UNKNOWN_METHOD,
 			"message": "Unknown method: %s" % method}}
+
+
+## [code]list_actions[/code]: the user's input surface, with what each action
+## is bound to. Godot's own ui_* actions are left out unless
+## [code]include_ui[/code].
+func list_actions(params: Dictionary) -> Dictionary:
+	var include_ui: bool = params.get("include_ui", false)
+	var actions := {}
+	for action in InputMap.get_actions():
+		var action_name := String(action)
+		if action_name.begins_with("ui_") and !include_ui:
+			continue
+		var events: Array[String] = []
+		for event in InputMap.action_get_events(action):
+			events.append(event.as_text())
+		actions[action_name] = events
+	return {"actions": actions}
 
 
 # Reads the root viewport, so it shows what is on screen. A batch that hides
@@ -87,7 +110,7 @@ func _screenshot(params: Dictionary) -> Dictionary:
 		return {"_error": {"code": ERR_INVALID_PARAMS, "message": "'redraw' must be a boolean"}}
 	if redraw_var:
 		RenderingServer.force_draw(true)
-	var image := _server.get_viewport().get_texture().get_image()
+	var image := _tree.root.get_texture().get_image()
 	var err := image.save_png(path)
 	if err != OK:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
@@ -108,8 +131,8 @@ func _warp_mouse(params: Dictionary) -> Variant:
 
 
 func _get_mouse_position() -> Dictionary:
-	var viewport: Viewport = _server.get_viewport()
-	var mouse_pos := IVAssistantTestSuite.to_window_pixels(viewport, viewport.get_mouse_position())
+	var viewport := _tree.root
+	var mouse_pos := _to_window_pixels(viewport, viewport.get_mouse_position())
 	return {"position": [mouse_pos.x, mouse_pos.y]}
 
 
@@ -129,53 +152,36 @@ func _project_to_screen(params: Dictionary) -> Variant:
 		var node: Node3D = node_or_err
 		world_pos = node.global_position
 		if params.has("offset"):
-			var offset_or_err: Variant = IVAssistantTestSuite.parse_vector3(params.get("offset"),
-					"offset")
+			var offset_or_err: Variant = _parse_vector3(params.get("offset"), "offset")
 			if offset_or_err is Dictionary:
 				return offset_or_err
 			var offset: Vector3 = offset_or_err
 			world_pos += offset
 	else:
-		var pos_or_err: Variant = IVAssistantTestSuite.parse_vector3(
-				params.get("world_position"), "world_position")
+		var pos_or_err: Variant = _parse_vector3(params.get("world_position"),
+				"world_position")
 		if pos_or_err is Dictionary:
 			return pos_or_err
 		var parsed_pos: Vector3 = pos_or_err
 		world_pos = parsed_pos
 
-	var viewport: Viewport = _server.get_viewport()
+	var viewport := _tree.root
 	var camera: Camera3D = viewport.get_camera_3d()
 	if !camera:
-		return {"_error": {"code": ERR_NOT_STARTED, "message": "No active Camera3D"}}
+		return {"_error": {"code": ERR_NOT_FOUND, "message": "No active Camera3D"}}
 	var behind: bool = camera.is_position_behind(world_pos)
 	var screen: Vector2 = camera.unproject_position(world_pos)
 	var rect_size: Vector2 = viewport.get_visible_rect().size
 	var on_screen := !behind and (
 			screen.x >= 0.0 and screen.y >= 0.0
 			and screen.x <= rect_size.x and screen.y <= rect_size.y)
-	var pixel := IVAssistantTestSuite.to_window_pixels(viewport, screen)
+	var pixel := _to_window_pixels(viewport, screen)
 	return {
 		"position": [pixel.x, pixel.y],
 		"on_screen": on_screen,
 		"behind_camera": behind,
 		"world_position_used": [world_pos.x, world_pos.y, world_pos.z],
 	}
-
-
-# The user's input surface, with what each action is bound to. Godot's own ui_*
-# actions are left out unless asked for.
-func _list_actions(params: Dictionary) -> Dictionary:
-	var include_ui: bool = params.get("include_ui", false)
-	var actions := {}
-	for action in InputMap.get_actions():
-		var action_name := String(action)
-		if action_name.begins_with("ui_") and !include_ui:
-			continue
-		var events: Array[String] = []
-		for event in InputMap.action_get_events(action):
-			events.append(event.as_text())
-		actions[action_name] = events
-	return {"actions": actions}
 
 
 func _press_action(params: Dictionary) -> Dictionary:
@@ -215,13 +221,13 @@ func _press_action(params: Dictionary) -> Dictionary:
 func _resolve_node3d(address: Variant) -> Variant:
 	var node: Node
 	if typeof(address) == TYPE_STRING and str(address).begins_with("/"):
-		node = _server.get_tree().root.get_node_or_null(NodePath(str(address)))
+		node = _tree.root.get_node_or_null(NodePath(str(address)))
 	else:
-		var object := resolve(address)
+		var object := _automation.resolve(address)
 		if object is Node:
 			node = object
 		elif !object:
-			return {"_error": {"code": ERR_NOT_FOUND, "message": get_resolve_error()}}
+			return {"_error": {"code": ERR_NOT_FOUND, "message": _automation.error}}
 	if !(node is Node3D):
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "'node' must address a Node3D"}}
@@ -245,6 +251,30 @@ func _parse_vector2(value: Variant, param_name: String) -> Variant:
 	return Vector2(x, y)
 
 
+func _parse_vector3(value: Variant, param_name: String) -> Variant:
+	if typeof(value) != TYPE_ARRAY:
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "'%s' must be an array of 3 numbers" % param_name}}
+	var arr: Array = value
+	if arr.size() != 3:
+		return {"_error": {"code": ERR_INVALID_PARAMS,
+				"message": "'%s' must have exactly 3 elements" % param_name}}
+	for i in 3:
+		if typeof(arr[i]) != TYPE_FLOAT and typeof(arr[i]) != TYPE_INT:
+			return {"_error": {"code": ERR_INVALID_PARAMS,
+					"message": "'%s' elements must be numbers" % param_name}}
+	var x: float = arr[0]
+	var y: float = arr[1]
+	var z: float = arr[2]
+	return Vector3(x, y, z)
+
+
+# A viewport's 2D position (a mouse position, or an unproject_position() result)
+# in window pixels, which a project's display scale makes differ.
+func _to_window_pixels(viewport: Viewport, position: Vector2) -> Vector2:
+	return viewport.get_final_transform() * position
+
+
 # =============================================================================
 # GUI inspection. Generic scene-tree introspection uses duck-typing and
 # Variant-based Dictionary access, producing unavoidable warnings.
@@ -254,7 +284,7 @@ func _parse_vector2(value: Variant, param_name: String) -> Variant:
 
 func _find_nodes(params: Dictionary) -> Variant:
 	var root_path: String = params.get("root", "/root")
-	var root_node := _server.get_tree().root.get_node_or_null(root_path)
+	var root_node := _tree.root.get_node_or_null(root_path)
 	if !root_node:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "Root node not found: %s" % root_path}}
@@ -310,7 +340,7 @@ func _inspect_node(params: Dictionary) -> Variant:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "'path' parameter is required"}}
 
-	var node := _server.get_tree().root.get_node_or_null(path)
+	var node := _tree.root.get_node_or_null(path)
 	if !node:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "Node not found: %s" % path}}
@@ -325,7 +355,7 @@ func _read_node_text(params: Dictionary) -> Variant:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "'path' parameter is required"}}
 
-	var node := _server.get_tree().root.get_node_or_null(path)
+	var node := _tree.root.get_node_or_null(path)
 	if !node:
 		return {"_error": {"code": ERR_INVALID_PARAMS,
 				"message": "Node not found: %s" % path}}

@@ -18,7 +18,7 @@
 # limitations under the License.
 # *****************************************************************************
 class_name IVAssistantWidgets
-extends IVAssistantTestSuite
+extends RefCounted
 
 ## Built-in widget listing and operation: the user surface.
 ##
@@ -27,6 +27,14 @@ extends IVAssistantTestSuite
 ## handler runs; a composite widget declares its own value interface instead.
 ## Meaning comes from Godot's accessibility properties, identity from a
 ## declared [code]AUTOMATION_KEY[/code]. See SPECIFICATION.md §4.3 and §11.7.
+
+## The methods these tools handle, by their protocol names.
+const METHODS: Array[String] = ["list_widgets", "operate_widget"]
+
+const ERR_UNKNOWN_METHOD := 1
+const ERR_INVALID_PARAMS := 2
+const ERR_NOT_FOUND := 3
+const ERR_NOT_ALLOWED := 5
 
 const VALUE_GETTER := &"get_automation_value"
 const VALUE_SETTER := &"set_automation_value"
@@ -42,21 +50,18 @@ const FAMILY_FOLDABLE := "foldable"
 const FAMILY_LINE_EDIT := "line_edit"
 const FAMILY_TEXT_EDIT := "text_edit"
 
+var _tree: SceneTree
+var _automation: IVAssistantAutomation
 var _class_counts: Dictionary[StringName, int] = {} # widgets per class, from _collect_widgets()
 
 
-func get_method_names() -> Array[String]:
-	return ["list_widgets", "operate_widget"]
+func _init(tree: SceneTree, automation: IVAssistantAutomation) -> void:
+	_tree = tree
+	_automation = automation
 
 
-func get_capabilities() -> Array[String]:
-	return ["widgets"]
-
-
-func requires_sim_started() -> bool:
-	return false
-
-
+## Handles one of [constant METHODS]. Returns its result, or an
+## [code]_error[/code] Dictionary.
 func dispatch(method: String, params: Dictionary) -> Variant:
 	match method:
 		"list_widgets":
@@ -71,7 +76,7 @@ func dispatch(method: String, params: Dictionary) -> Variant:
 ## not unless [code]visible_only[/code].
 func list_widgets(params: Dictionary) -> Dictionary:
 	var root_path: String = params.get("root", "/root")
-	var root := _server.get_tree().root.get_node_or_null(NodePath(root_path))
+	var root := _tree.root.get_node_or_null(NodePath(root_path))
 	if !root:
 		return {"_error": {"code": ERR_NOT_FOUND, "message": "No node at '%s'" % root_path}}
 	var visible_only: bool = params.get("visible_only", false)
@@ -86,7 +91,7 @@ func list_widgets(params: Dictionary) -> Dictionary:
 
 
 func _operate_widget(params: Dictionary) -> Variant:
-	var widgets := _collect_widgets(_server.get_tree().root)
+	var widgets := _collect_widgets(_tree.root)
 	var widget_or_err: Variant = _resolve_widget(params.get("widget"), widgets)
 	if widget_or_err is Dictionary:
 		return widget_or_err
@@ -135,16 +140,15 @@ func _operate_composite(widget: Control, params: Dictionary) -> Variant:
 		return _param_error("Give 'value' (see the widget's state and options)")
 	if !widget.has_method(VALUE_SETTER):
 		return {"_error": {"code": ERR_NOT_ALLOWED, "message": "This widget can't be set"}}
-	var automation := _get_automation()
-	var declaration := automation.get_declaration_of(widget)
+	var declaration := _automation.get_declaration_of(widget)
 	var info: Dictionary = declaration.method_infos.get(VALUE_SETTER, {})
 	var arg_infos: Array = info.get("args", [{}])
 	var arg_info: Dictionary = arg_infos[0] if arg_infos else {}
-	automation.converter.error = ""
-	var value: Variant = automation.converter.from_json(params["value"], arg_info, "value")
-	if automation.converter.error:
-		var message := automation.converter.error
-		automation.converter.error = ""
+	_automation.converter.error = ""
+	var value: Variant = _automation.converter.from_json(params["value"], arg_info, "value")
+	if _automation.converter.error:
+		var message := _automation.converter.error
+		_automation.converter.error = ""
 		return _param_error(message)
 	var accepted: Variant = widget.call(VALUE_SETTER, value)
 	if accepted == false:
@@ -284,7 +288,7 @@ func _press(button: BaseButton) -> void:
 func _describe_widget(widget: Control, openers: Dictionary[Node, Control]) -> Dictionary:
 	var entry := {
 		"widget": _get_address(widget),
-		"class": String(_get_automation().get_object_class_name(widget)),
+		"class": String(_automation.get_object_class_name(widget)),
 		"family": _get_family(widget),
 		"name": _get_widget_name(widget),
 	}
@@ -454,10 +458,9 @@ func _is_enabled(widget: Control) -> bool:
 func _collect_widgets(root: Node) -> Array[Control]:
 	var widgets: Array[Control] = []
 	_collect_widgets_recursive(root, widgets)
-	var automation := _get_automation()
 	_class_counts.clear()
 	for widget in widgets:
-		var class_name_ := automation.get_object_class_name(widget)
+		var class_name_ := _automation.get_object_class_name(widget)
 		_class_counts[class_name_] = _class_counts.get(class_name_, 0) + 1
 	return widgets
 
@@ -502,14 +505,13 @@ func _find_opener(widget: Control, openers: Dictionary[Node, Control]) -> Contro
 # A declared key, else the class when it has one widget, else the path. Valid
 # after _collect_widgets().
 func _get_address(widget: Control) -> Variant:
-	var automation := _get_automation()
-	var declaration := automation.get_declaration_of(widget)
-	var class_name_ := automation.get_object_class_name(widget)
+	var declaration := _automation.get_declaration_of(widget)
+	var class_name_ := _automation.get_object_class_name(widget)
 	if declaration and declaration.key:
 		var address := {"class": String(class_name_)}
 		for property in declaration.key:
 			var info: Dictionary = declaration.property_infos.get(property, {})
-			address[String(property)] = automation.converter.to_json(widget.get(property), info)
+			address[String(property)] = _automation.converter.to_json(widget.get(property), info)
 		return address
 	if declaration and _class_counts.get(class_name_, 0) == 1:
 		return {"class": String(class_name_)}
@@ -517,7 +519,6 @@ func _get_address(widget: Control) -> Variant:
 
 
 func _resolve_widget(address: Variant, widgets: Array[Control]) -> Variant:
-	var automation := _get_automation()
 	var fields := {}
 	match typeof(address):
 		TYPE_STRING:
@@ -529,7 +530,7 @@ func _resolve_widget(address: Variant, widgets: Array[Control]) -> Variant:
 			return _param_error("'widget' must be an address: a class, {\"class\": ..., <key>: ...}"
 					+ " or {\"path\": ...} (see list_widgets)")
 	if fields.has("path"):
-		var node := _server.get_tree().root.get_node_or_null(NodePath(str(fields.path)))
+		var node := _tree.root.get_node_or_null(NodePath(str(fields.path)))
 		if node is Control and widgets.has(node):
 			return node
 		return {"_error": {"code": ERR_NOT_FOUND, "message": "No widget at '%s'" % fields.path}}
@@ -538,17 +539,17 @@ func _resolve_widget(address: Variant, widgets: Array[Control]) -> Variant:
 	var class_name_ := StringName(str(fields["class"]))
 	var matches: Array[Control] = []
 	for widget in widgets:
-		if !automation.is_instance_of_class(widget, class_name_):
+		if !_automation.is_instance_of_class(widget, class_name_):
 			continue
-		var declaration := automation.get_declaration_of(widget)
+		var declaration := _automation.get_declaration_of(widget)
 		var is_match := true
 		for field: Variant in fields:
 			if field == "class":
 				continue
 			var property := StringName(str(field))
 			var info: Dictionary = declaration.property_infos.get(property, {}) if declaration 					else {}
-			if !(property in widget) or !automation.json_equal(
-					automation.converter.to_json(widget.get(property), info), fields[field]):
+			if !(property in widget) or !_automation.json_equal(
+					_automation.converter.to_json(widget.get(property), info), fields[field]):
 				is_match = false
 				break
 		if is_match:
@@ -587,12 +588,7 @@ func _get_item_texts(count: int, get_text: Callable) -> Array[String]:
 
 
 func _to_json(value: Variant) -> Variant:
-	return _get_automation().converter.to_json(value)
-
-
-func _get_automation() -> IVAssistantAutomation:
-	@warning_ignore("unsafe_method_access")
-	return _server.get_automation()
+	return _automation.converter.to_json(value)
 
 
 func _param_error(message: String) -> Dictionary:

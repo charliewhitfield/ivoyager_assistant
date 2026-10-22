@@ -28,8 +28,9 @@ extends RefCounted
 ## what a client may call and read in [code]AUTOMATION_*[/code] constants, owns
 ## its gates in [code]is_automation_available()[/code], and names further
 ## objects in [code]get_automation_objects()[/code]. Objects are found among
-## the autoloads, the objects they name, and the scene tree, and are looked up
-## again at each request, so objects freed on a reset simply drop out.
+## the autoloads, the objects they name, and the scene tree at each request and
+## let go once it is answered, so none is kept alive here and objects freed on a
+## reset simply drop out.
 
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2
@@ -101,10 +102,16 @@ func _init(tree: SceneTree) -> void:
 		_tree.node_removed.connect(_on_tree_changed)
 
 
-## Marks discovery stale. The server calls this once per request, so objects
-## named through [code]get_automation_objects()[/code] are current.
-func invalidate() -> void:
+## Lets go of every object discovery found, so the next request finds them
+## anew. The server calls this once each request is answered: an object held
+## between requests would outlive a reset, such as the procedural objects a game
+## load frees.
+func release() -> void:
 	_dirty = true
+	_named.clear()
+	_names.clear()
+	_objects.clear()
+	_instances.clear()
 
 
 # *****************************************************************************
