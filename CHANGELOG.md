@@ -11,15 +11,16 @@ Under development using Godot 4.7.2.
 
 ### Added
 * `IVAssistant`, a second autoload: the user's assistant, turned on by `[assistant] enabled`, which answers requests in process in any build, release and web included, through new `IVAssistantDispatcher`, as the TCP server now does. It reaches only the user's surface: the members a class marks in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (which `describe` marks, and with `user` lists alone), the widgets and the input actions. It starts Phase 5; see SPECIFICATION.md §2.1 and §11.1.
+* The user's assistant's instructions (`[assistant] instructions_file`) and the tool sets a project offers its model (`[assistant_tool_sets]`), whose definitions new `IVAssistantToolSet` generates from the declarations. See SPECIFICATION.md §12.
 * Automation: a class declares what a client may read and call (`AUTOMATION_*` constants, `is_automation_available()`, `get_automation_objects()`), and new methods `describe`, `get` and `call` discover and use those declarations through Godot alone, converting JSON by the declared types. See SPECIFICATION.md §11 and §4.1–4.2.
 * Methods `list_widgets` and `operate_widget`, which list a user's controls by their accessibility names and keys and operate them as a user does, a composite widget through its declared value interface. See SPECIFICATION.md §4.3 and §11.7.
 * JSON-RPC 2.0 batch requests, answered in order within one frame.
-* `IVAssistantExportPlugin`, which adds declared members' doc comments to every export where the user's assistant is enabled or the TCP server can run.
+* `IVAssistantExportPlugin`, which adds declared members' doc comments to every export where the user's assistant is enabled or the TCP server can run, and the text files the config names where their client runs.
 * Built-in method `get_mouse_position`; `screenshot` takes `redraw`, and `project_to_screen` a `node` address with an `offset`.
 * `AssistantClient` in `tools/assistant_test.py` has `describe()`, `get()`, `invoke()` and `batch()`, raising `AssistantError` on an error response.
 
 ### Changed
-* [Project breaking] The TCP server's config keys `enabled`, `debug_only`, `port` and `min_ready_delay_frames` moved from `[assistant]` to `[assistant_server]`, and `[assistant] enabled` now turns on the user's assistant. Move an override of any of them to the new section.
+* [Project breaking] The TCP server's config keys `enabled`, `debug_only`, `port`, `min_ready_delay_frames` and `context_file` moved from `[assistant]` to `[assistant_server]`, and `[assistant] enabled` now turns on the user's assistant. Move an override of any of them to the new section.
 * The server takes its lifecycle signals and quit from an autoload's `AUTOMATION_LIFECYCLE` declaration and refers to no Core class; `get_project_info` reports protocol version 5 and `ready`.
 * `press_action`, `warp_mouse`, `list_actions`, `project_to_screen`, `screenshot` and the GUI inspection methods (formerly `GuiInspectionSuite`) are built in, needing only Godot.
 * `tools/assistant_test.py` tests through declared members, batches and widgets, and saves and loads through the Save plugin's `IVSave`.

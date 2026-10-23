@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 and 5.2 are done, 5.3 is next.
+v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 to 5.3 are done, 5.4 is next.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -49,7 +49,7 @@ The steps are in build order. The Planetarium is the first project to get an ass
 
 - `IVAssistant`, a second autoload, is the user's assistant. `[assistant] enabled` turns it on, and it runs in every build; its `request(method, params)` answers in process what a TCP client would be answered. The conversation loop (5.5) calls it.
 - `IVAssistantDispatcher` answers a request by its method (`describe`, `get`, `call`, the built-in tools). The server and `IVAssistant` each hold one, so a model's tool call takes a test client's path.
-- The server's keys moved to `[assistant_server]`; it stays debug-only and inert on the web. `[assistant]` keeps `assistant_name` and `context_file`, which both clients are given.
+- The server's keys moved to `[assistant_server]`; it stays debug-only and inert on the web. `[assistant]` keeps `assistant_name`, which both clients are given.
 - The doc-comment digest (§11.5) goes into every export where the assistant is enabled or the server can run, and no other.
 
 ### Step 5.2: What an assistant may call — done
@@ -57,17 +57,17 @@ The steps are in build order. The Planetarium is the first project to get an ass
 - Classes mark the user's members in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (§11.1): the widget-level entry points of §10 and what a user sees, never a marked exception (`IVCameraHandler.move_to`), a test probe or a raw internal. Marking is opt-in, so an unmarked member is kept from the assistant. Core, Units and the Planetarium's `units.gd` mark theirs.
 - `IVAssistant` reaches only the user's surface: the marked members, the widgets and the input actions. `describe` marks each user member, and with `user` lists those alone, which is what the assistant is given.
 
-### Step 5.3: The project's tools and personality
+### Step 5.3: The project's tools and personality — done
 
-- A project names the declared members its assistant is offered, and adds tools of its own as members of its own classes (§7.2, as the Planetarium's probes are).
-- `describe` of the user's surface runs to ~70 KB in the Planetarium, ~20K tokens. A large remote model takes that, and a provider's prompt cache makes resending it cheap; a small local model chooses well among 10–20 tools. So a project's tool list may differ by model size.
-- Tools that look up the project's own data (the Planetarium's tables) let the model answer from the app rather than its memory, which matters most for a small model.
-- A text description of the current view (selection, what is in frame, time, speed), declared once, serves both the assistant and a screen reader's announcements.
-- The personality is the model's instructions, with `assistant_name`; `context_file` (§8.3) grows into it. The Planetarium's `assistant_context.txt` is written for a test client (probes, screenshots, `suppress_caching`), not for Galileo, so the two need separate texts or one split in two.
+- `[assistant] instructions_file` is the model's instructions, the assistant's personality, with `{assistant_name}` filled in (§12.1). The test client's notes are a separate text, so `context_file` moved to `[assistant_server]`. An export gets each file where its client runs.
+- A project names tool sets under `[assistant_tool_sets]`: methods the assistant answers (`call`, `operate_widget`, ...) or user methods of declared objects (`"SelectionManager.select_by_name"`). `IVAssistantToolSet` generates each tool's definition, a JSON Schema from the forms of §11.4 with the doc comment as its description, and runs its calls (§12.2). The plugin's `full` set is the generic tools, with `describe` (~20K tokens) for a large model; the Planetarium's `compact` set is 15 tools, ~7 KB of definitions, for a small one.
+- Core: `IVSelectionData.get_body_data` gives the data panel's rows for any body, and `IVViewManager.get_view_description` says what the user sees (selection, camera, bodies in view, date, time and speed), both as text in the user's language, for a screen reader as for an assistant.
+- The Planetarium: `BodyFinder.find_bodies`, from a user's words to a body's key, and Galileo's instructions (`planetarium/galileo_instructions.txt`).
 
 ### Step 5.4: Connections and the setup wizard
 
-- Two adapters cover nearly every model: OpenAI-compatible chat completions with tools (Ollama, LM Studio and llama.cpp's `llama-server` locally; OpenRouter, Groq, Gemini's compatibility endpoint and OpenAI remotely), and Anthropic's Messages API. A project may add its own adapter.
+- Two adapters cover nearly every model: OpenAI-compatible chat completions with tools (Ollama, LM Studio and llama.cpp's `llama-server` locally; OpenRouter, Groq, Gemini's compatibility endpoint and OpenAI remotely), and Anthropic's Messages API. A project may add its own adapter. An adapter adjusts the tool definitions' JSON Schema for a provider that takes only part of it (`anyOf`, a schema without a type for a `Variant` argument).
+- A connection chooses one of the project's tool sets (§12.2), by the model's size.
 - The wizard finds local servers (Ollama on port 11434, LM Studio on 1234) and lists their models, or takes a provider and the user's key; either way it confirms the connection with one test tool call. A project offers a subset, or presets one connection and hides the wizard.
 - Keys are the user's own, stored under `user://`; the wizard says so.
 - Web: `HTTPRequest` runs on the browser's `fetch`, so a service must accept calls from a page (CORS). Anthropic does with the `anthropic-dangerous-direct-browser-access` header, and OpenRouter does. A local Ollama needs `OLLAMA_ORIGINS` set to the page's origin and the browser's local-network permission. Chrome's built-in model (the Prompt API, Gemini Nano) is free and on-device, but desktop Chrome only, with more than 4 GB of video memory: a candidate for a small assistant on the web.
@@ -97,4 +97,4 @@ The steps are in build order. The Planetarium is the first project to get an ass
 
 ### Accessibility without AI
 
-Screen-reader coverage (data panels, popups' contents, checking what a screen reader reads), announcements of state changes (`accessibility_live`) and spatial audio for bodies' positions relative to the camera need no model and aren't this plugin's: they are work in Core's widgets and a project's GUI. They are listed here until Core has a plan to hold them.
+Screen-reader coverage (data panels, popups' contents, checking what a screen reader reads), announcements of state changes (`accessibility_live`; `IVViewManager.get_view_description()` is text to announce) and spatial audio for bodies' positions relative to the camera need no model and aren't this plugin's: they are work in Core's widgets and a project's GUI. They are listed here until Core has a plan to hold them.

@@ -94,7 +94,7 @@ func _ready() -> void:
 	_apply_cmdline_user_args()
 	_assistant_name = config.get_value("assistant", "assistant_name", "")
 	_min_ready_delay_frames = config.get_value("assistant_server", "min_ready_delay_frames", 10)
-	var context_file: String = config.get_value("assistant", "context_file", "")
+	var context_file: String = config.get_value("assistant_server", "context_file", "")
 	if context_file:
 		_context_content = _load_context_file(context_file)
 	_dispatcher = IVAssistantDispatcher.new(get_tree())
