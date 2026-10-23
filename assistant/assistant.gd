@@ -28,10 +28,11 @@ extends Node
 ## members classes mark as the user's, widgets and input actions
 ## (SPECIFICATION.md §11.1). A model is given [member instructions] and a tool
 ## set ([method get_tool_set]), which the project names, through the user's
-## connection ([member connections]), which the setup wizard makes. Inert
-## unless the project enables it in [code]ivoyager_assistant.cfg[/code] under
-## [code][assistant][/code]. See SPECIFICATION.md §12, and CODING_PLAN.md
-## Phase 5 for the parts still to come: the conversation loop and the chat box.
+## connection ([member connections]), which the setup wizard makes; the user
+## talks with it in [member conversation], which a chat box
+## ([IVAssistantChatBox]) shows. Inert unless the project enables it in
+## [code]ivoyager_assistant.cfg[/code] under [code][assistant][/code]. See
+## SPECIFICATION.md §12.
 
 const ERR_NOT_ALLOWED := 5
 ## The tool a connection test asks the model to call, beside its tool set's.
@@ -56,6 +57,8 @@ var instructions := ""
 ## The providers the project offers and the user's connection; null while
 ## disabled.
 var connections: IVAssistantConnections
+## The user's conversation with the assistant; null while disabled.
+var conversation: IVAssistantConversation
 
 var _dispatcher: IVAssistantDispatcher # null while disabled
 var _tool_set_entries: Dictionary[String, Array] = {}
@@ -83,6 +86,8 @@ func _ready() -> void:
 			var entries: Array = config.get_value("assistant_tool_sets", tool_set_name)
 			_tool_set_entries[tool_set_name] = entries
 	connections = IVAssistantConnections.new(config)
+	conversation = IVAssistantConversation.new(connections, instructions, get_tool_set,
+			assistant_name)
 
 
 ## Whether the project enables the assistant.

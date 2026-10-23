@@ -31,7 +31,10 @@ extends IVAssistantConnection
 func make_tool_results(results: Array[Dictionary]) -> Array[Dictionary]:
 	var messages: Array[Dictionary] = []
 	for result in results:
-		messages.append({"role": "tool", "tool_call_id": result.id, "content": result.content})
+		var content: String = result.content
+		if result.get("is_error", false):
+			content = "Error: " + content # the API has no field for it
+		messages.append({"role": "tool", "tool_call_id": result.id, "content": content})
 	return messages
 
 
@@ -105,7 +108,7 @@ func _parse_arguments(arguments: Variant) -> Dictionary:
 		return arguments # some servers send an object, not its text
 	if arguments == null or (arguments is String and !arguments):
 		return {}
-	var parsed: Variant = JSON.parse_string(str(arguments))
+	var parsed: Variant = _parse_json(str(arguments))
 	if parsed is Dictionary:
 		return parsed
 	return {"_unparsed": str(arguments)}

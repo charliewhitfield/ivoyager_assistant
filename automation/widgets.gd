@@ -40,7 +40,7 @@ const ERR_NOT_ALLOWED := 5
 
 ## A node in this group, with everything under it, is kept from the user's
 ## assistant: GUI where the user deals with the assistant itself, such as the
-## setup wizard and its key.
+## setup wizard and its key, and the chat box.
 const PRIVATE_GROUP := &"assistant_private"
 
 const VALUE_GETTER := &"get_automation_value"

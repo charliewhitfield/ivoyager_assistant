@@ -15,7 +15,7 @@ Goal 2 divides the work three ways:
 - **The plugin** provides the plumbing: connections to models and a setup wizard, the conversation loop that runs the model's tool calls through the declarations, and a chat box.
 - **The project** provides the assistant's personality, the tools it offers, which connections to offer, and the chat box's style and place. The Planetarium puts it in a panel at the bottom center.
 
-Goal 2 is under way (`CODING_PLAN.md` Phase 5): `IVAssistant` reaches the app in process in any build (§2.1), a project gives it instructions and tool sets (§12), and the user connects it to a model in a setup wizard (§12.4). The conversation loop and the chat box are still to come.
+Goal 2 is under way (`CODING_PLAN.md` Phase 5): `IVAssistant` reaches the app in process in any build (§2.1), a project gives it instructions and tool sets (§12), and the user connects it to a model in a setup wizard (§12.4) and talks with it in a chat box (§12.5). MCP, speech and a model shipped with an app are still to come.
 
 The plugin knows Godot, not the project. A project's classes declare what a client may read and call (§11), and the Assistant discovers and dispatches those declarations; so a change in Core or in a project needs no change here.
 
@@ -25,7 +25,9 @@ The plugin knows Godot, not the project. A project's classes declare what a clie
 
 - **EditorPlugin** — Registers the `IVAssistantServer` and `IVAssistant` autoloads via `add_autoload_singleton()` when the plugin is enabled, and removes them when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
 - **IVAssistantServer** — The test client's transport (goal 1). An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Runs only in debug builds unless configured otherwise, and is inert in a web export, which has no `TCPServer`. It refers to no project class.
-- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener. It reaches only the user's surface: the members classes mark as the user's (§11.1), the widgets (§4.3) and the input actions (`list_actions`, `press_action`). A model is given the project's instructions and one of its tool sets (§12), through the user's connection (§12.4).
+- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener. It reaches only the user's surface: the members classes mark as the user's (§11.1), the widgets (§4.3) and the input actions (`list_actions`, `press_action`). A model is given the project's instructions and one of its tool sets (§12), through the user's connection (§12.4), and the user talks with it in `conversation` (§12.5).
+- **IVAssistantConversation** — The user's conversation with the assistant, and the loop that carries it: the user's words go to the model, the tools it calls run, and their results go back, until it answers (§12.5).
+- **IVAssistantChatBox** — A widget where the user talks with the assistant, which a project places and themes (§12.5).
 - **IVAssistantConnections** — The model providers a project offers, and the user's connection to one, kept under `user://` with any key the user asks it to remember (§12.4).
 - **IVAssistantConnection** — A connection to one model, and the adapter for one provider API: `IVAssistantOpenAIConnection` (OpenAI-compatible chat completions, which local servers and most services speak) and `IVAssistantAnthropicConnection` (Anthropic's Messages API). It sends a conversation with tool definitions and lists models (§12.4).
 - **IVAssistantSetupWizard** — Where the user chooses a provider and model and gives a key; a connection is saved once one test tool call confirms it (§12.4).
@@ -58,6 +60,8 @@ IVAssistant (autoload Node; the user's assistant, inert unless enabled)
   ├─ connections: IVAssistantConnections (§12.4)
   │    ├─ providers from the config; the user's connection and keys under user://
   │    └─ make_connection() -> IVAssistantConnection: send(), list_models()
+  ├─ conversation: IVAssistantConversation (§12.5)
+  │    └─ send(text): the model's tool calls run through the tool set until it answers
   ├─ test_connection(connection): one test tool call
   ├─ open_setup_wizard() -> IVAssistantSetupWizard
   └─ request(method, params): answers in process
@@ -91,7 +95,7 @@ For projects with `wait_for_start = true` (splash screens), there is a gap betwe
 - Server starts only when `OS.is_debug_build()` is true, unless overridden in config
 - No authentication (localhost-only, debug-only)
 - A client calls only members a class declares (§11.1), never an arbitrary method
-- The user's assistant reaches only the user's surface (§11.1), and never the GUI where the user deals with the assistant itself: the setup wizard is in `IVAssistantWidgets.PRIVATE_GROUP`, which its widget listing skips. A secret `LineEdit` (a key) reports `secret` to every client, never its text (§11.7)
+- The user's assistant reaches only the user's surface (§11.1), and never the GUI where the user deals with the assistant itself: the setup wizard and the chat box are in `IVAssistantWidgets.PRIVATE_GROUP`, which its widget listing skips. A secret `LineEdit` (a key) reports `secret` to every client, never its text (§11.7)
 - The user's key is stored unencrypted under `user://` if they ask it to be remembered, and sent only to the provider it is for (§12.4)
 
 ## 3. Communication Protocol
@@ -835,7 +839,7 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 
 **Composite widgets: their own value interface.** A widget whose state is not one control's declares `get_automation_value()` and `set_automation_value(value)`, plus `get_automation_options()` where the value is one of a set. `set_automation_value()` calls the Core method the widget's own handlers call, and returns `false` to refuse a value. The Assistant treats such a widget as one unit: the controls of its own scene (those it owns) are not widgets, though controls a project adds to it are. In Core: `IVSpeedButtons` (a speed index), `IVTrackCkbxs` (`"ecliptic"`, `"orbit"`, `"ground"`), `IVTimeSetter` (`[year, month, day, hour, minute, second]`) and `IVFocalLengthControl` (millimeters). A container without the interface (`IVHUDsBox`) is descended.
 
-**Privacy.** A `LineEdit` with `secret` set (a key, a password) reports `"secret": true` as its state, never its text, to any client; it can still be typed into. A node in `IVAssistantWidgets.PRIVATE_GROUP` (`"assistant_private"`), with everything under it, is not a widget to the user's assistant: GUI where the user deals with the assistant itself, such as the setup wizard.
+**Privacy.** A `LineEdit` with `secret` set (a key, a password) reports `"secret": true` as its state, never its text, to any client; it can still be typed into. A node in `IVAssistantWidgets.PRIVATE_GROUP` (`"assistant_private"`), with everything under it, is not a widget to the user's assistant: GUI where the user deals with the assistant itself, such as the setup wizard and the chat box.
 
 **Reach.** Popups are in-tree `Window`s, and a widget meant for automation exists in the tree, hidden if need be, so its absence from `list_widgets` means the project lacks it. A hidden widget is reached by operating its opener first, which `list_widgets` names as `opened_by`; no project configures scene roots.
 
@@ -855,7 +859,7 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 
 ## 12. The user's assistant
 
-`IVAssistant` (§2.1) gives a model two things the project writes: instructions, and a set of tools to call. Both are the project's; the plugin generates the tools' definitions from the declarations and runs their calls through `request()`, on the user's surface alone (§11.1). The model is the user's choice, made in the setup wizard (§12.4). The conversation loop that sends these is still to come (`CODING_PLAN.md` Phase 5).
+`IVAssistant` (§2.1) gives a model two things the project writes: instructions, and a set of tools to call. Both are the project's; the plugin generates the tools' definitions from the declarations and runs their calls through `request()`, on the user's surface alone (§11.1). The model is the user's choice, made in the setup wizard (§12.4), and the conversation sends these to it (§12.5).
 
 ### 12.1 Instructions
 
@@ -919,3 +923,13 @@ With `simple_schemas`, `adapt_parameters()` simplifies the tool definitions for 
 **The wizard.** `IVAssistant.open_setup_wizard()` opens an `IVAssistantSetupWizard`, a popup that stays open while the user works elsewhere, as when getting a key. The user picks a provider; the wizard asks the local servers for their models (in a web build only the one picked, since the browser may ask the user's permission to reach the computer's own servers), or lists a service's once a key is given; and "Test and connect" saves a connection only once the test confirms it. It says where the key is kept. A project places its entry point: the Planetarium adds a button to Core's options popup (`IVOptionsPopup.add_button()`).
 
 **The web.** `HTTPRequest` runs on the browser's `fetch`, so a service must allow calls from a page (CORS). As of October 2026 the plugin's services do, Anthropic with the `anthropic-dangerous-direct-browser-access` header, which the adapter sends in a web build. A page can reach a local server only with the browser's permission (Chrome's and Firefox's local network access prompts) and the server's: Ollama needs `OLLAMA_ORIGINS` set to the page's origin, LM Studio its Enable CORS setting.
+
+### 12.5 The conversation and the chat box
+
+`IVAssistant.conversation`, an `IVAssistantConversation`, is the user's conversation with the assistant through their connection, and the loop that carries it. `send(text)`, a coroutine, runs a turn: the user's words go to the model with the instructions and the connection's tool set, the tools the model calls run in order on the main thread through `IVAssistantToolSet.call_tool()`, as a client's `call` does, and their results go back, until the model answers. A tool's error (§3.3) goes back as the tool's result, marked as an error, so the model can fix its call or tell the user; so do an unknown tool and arguments that aren't a JSON object. A turn stops with an error after `max_requests_per_turn` (20) requests without an answer, so a model calling tools without end can't run up a bill. `cancel()` ends a running turn. `clear()` starts the conversation over, as a change of the user's connection does, since each provider keeps a conversation in its own form.
+
+Signals report each turn, whatever the user's words came from: `turn_started(text)`; `reply_received(text)` for each reply with text, which a reply that calls tools may have too; `tool_called(tool_name, arguments)` as each tool is about to run; and `turn_finished(error, unsent_text)`, with `error` "" or why the turn stopped, for the user. `cleared()` reports a new start. The history stays one a strict provider takes: words the model never answered, because the first request failed or was stopped, are left out of it and come back as `unsent_text`; once tools have run, the calls and their results stay.
+
+**The prompt cache.** Each request sends the instructions, then the tool definitions, then the conversation, and extends the last request unchanged: the tool set is built once per conversation, and the instructions hold nothing that changes. A provider's cache then holds the prefix, and a request pays in full only for what is new (§12.4 for Anthropic's).
+
+**The chat box.** `IVAssistantChatBox` is a widget a project places, usually in a panel of its own, and styles with its theme; `user_color`, `note_color` and `error_color` give what a theme has no entry for, and `width_in_font_sizes` and `transcript_lines` its size. It shows the conversation: the connection, the user's words, the tools called (`show_tool_calls`), each reply with the Markdown a model may write taken out, and why a turn stopped. Unsent words go back in its text field. Send becomes Stop during a turn, and New starts the conversation over. With no connection, it offers the setup wizard if the project has one. Its text field takes focus when it is shown and lets it go on `ui_cancel`, so the app's keys work again. Each reply is an accessibility live region, which a screen reader reads as it arrives; with `speak_replies`, the system's text-to-speech speaks it too, if the project setting `audio/general/text_to_speech` is on. The user's assistant can't see or operate it (`IVAssistantWidgets.PRIVATE_GROUP`). The Planetarium puts it in a panel at the bottom center, whose button appears once the user has connected Galileo.

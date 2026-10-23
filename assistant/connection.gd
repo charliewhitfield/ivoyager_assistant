@@ -212,7 +212,7 @@ func _request(method: HTTPClient.Method, request_url: String, body: Variant,
 		error = _get_result_error(result)
 		return null
 	var text := response.get_string_from_utf8()
-	var json: Variant = JSON.parse_string(text) if text else null
+	var json: Variant = _parse_json(text)
 	if code >= 400:
 		var message := _get_error_message(json)
 		if !message:
@@ -311,6 +311,13 @@ func _restore_json_arguments(tool_calls: Array[Dictionary],
 			if not value is String or !_is_free_form(property_schema):
 				continue
 			var text: String = value
-			var parsed: Variant = JSON.parse_string(text)
+			var parsed: Variant = _parse_json(text)
 			if parsed != null:
 				arguments[argument] = parsed
+
+
+# Returns null for text that isn't JSON, which models and error pages send, without
+# the error JSON.parse_string() prints.
+func _parse_json(text: String) -> Variant:
+	var json := JSON.new()
+	return json.data if json.parse(text) == OK else null

@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 to 5.4 are done, 5.5 is next.
+v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 to 5.5 are done, 5.6 is next.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -74,10 +74,13 @@ The steps are in build order. The Planetarium is the first project to get an ass
 - Facts as of October 2026 (§12.4): Anthropic's Max (5x: $100, 20x: $200 a month) and Team plans include API credits, claimed in claude.ai under Settings, Billing by linking a Console organization; any key of that organization spends them, in any app. Poe's subscribers spend their points through its OpenAI-compatible API. Gemini and Groq have free tiers; OpenRouter has free models within daily limits. GitHub Models was retired in July 2026. A web page reaches the plugin's services directly (CORS), and a local server only with the browser's local-network permission and the server's own setting.
 - Open: the wizard's text is English only (it isn't in a translation table), and a wizard taller than the view doesn't scroll. When the assistant is no longer experimental, a project may offer the wizard early on opening the app, with "don't show again".
 
-### Step 5.5: The conversation loop and the chat box
+### Step 5.5: The conversation loop and the chat box — done
 
-- The loop keeps the conversation and sends the instructions, tool definitions and history, stable parts first so a provider's prompt cache holds. It runs each tool call on the main thread as `call` does, returns a refusal (§3.3) to the model as the tool's error, and repeats until the model answers. It emits signals the chat box follows, and can be cancelled.
-- The chat box is a widget a project themes and places. The assistant doesn't operate it: it joins `IVAssistantWidgets.PRIVATE_GROUP`, which the user's widget listing skips. Replies go to an accessibility live region, so a screen reader reads them as they arrive; speaking them through `DisplayServer.tts_speak` is optional.
+- `IVAssistantConversation` (`IVAssistant.conversation`) carries the user's conversation (§12.5). Each request sends the instructions, the tool definitions, built once per conversation, and the history, and extends the last unchanged, so a provider's prompt cache holds. Tool calls run in order on the main thread through the tool set; an error (§3.3), an unknown tool or arguments that aren't JSON go back to the model as the tool's error; and it repeats until the model answers, up to `max_requests_per_turn` (20). Signals report each turn, `cancel()` stops it, and a new connection or `clear()` starts over. Words the model never answered leave the history, which stays valid for a strict provider, and go back to the user.
+- `IVAssistantChatBox` is a widget a project places and themes: the user's words, the tools called, replies with Markdown taken out, and errors; Send, which becomes Stop, and New; the setup wizard's button with no connection. Replies are accessibility live regions, and `speak_replies` speaks them through `DisplayServer.tts_speak`. It is in `IVAssistantWidgets.PRIVATE_GROUP`.
+- The Planetarium: Galileo's panel at the bottom center, closing and closed by the other panels as they are by one another; its button appears once Galileo is connected and opens the panel then, and key 6 shows and hides it. Galileo's instructions ask for plain text.
+- Checked against a mock server of both APIs that rejects what a strict provider would (unanswered tool calls, two user messages in a row, changed thinking blocks): tool calls in order and their effect in the app, the cached prefix, failures before and after tool calls, Stop, the request limit, an unknown tool and bad arguments, the chat box through its widgets, the button, panel and key, privacy from the user's assistant, and quitting mid-request without leaks. Not yet against a real provider, nor with a screen reader.
+- Open: a conversation grows without bound and can outgrow a small model's context, where a local server may drop its start, instructions included; trimming old turns would cost the cached prefix. Whether a screen reader announces each reply needs checking with one (Narrator, NVDA). The chat box's text is English only, as the wizard's is.
 
 ### Step 5.6: MCP
 
