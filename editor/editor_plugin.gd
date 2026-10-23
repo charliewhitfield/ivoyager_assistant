@@ -40,6 +40,10 @@ var _export_plugin: IVAssistantExportPlugin
 
 
 func _enter_tree() -> void:
+	# A command-line export runs as the editor's first file scan ends, before the
+	# waits below are over.
+	_export_plugin = IVAssistantExportPlugin.new()
+	add_export_plugin(_export_plugin)
 
 	# Wait for required plugins...
 	await get_tree().process_frame
@@ -62,8 +66,6 @@ func _enter_tree() -> void:
 	while filesystem.is_scanning():
 		await get_tree().process_frame
 	_add_autoloads()
-	_export_plugin = IVAssistantExportPlugin.new()
-	add_export_plugin(_export_plugin)
 
 
 func _exit_tree() -> void:

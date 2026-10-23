@@ -19,13 +19,15 @@
 # *****************************************************************************
 extends Node
 
-## Singleton [IVAssistantServer] is TCP server providing a JSON-RPC-style
-## interface for AI testing and accessibility.
+## Singleton [IVAssistantServer] is a TCP server providing a JSON-RPC-style
+## interface for AI-assisted testing.
 ##
 ## The server knows Godot, not the project. A project's classes declare what a
 ## client may read and call ([IVAssistantAutomation]); Godot-level tools
 ## ([IVAssistantGodotTools]) and widget operation ([IVAssistantWidgets]) are
-## built in. See SPECIFICATION.md for protocol and configuration details.
+## built in, and [IVAssistantDispatcher] answers each request. It runs only in
+## debug builds unless configured otherwise, and never on the web. See
+## SPECIFICATION.md for protocol and configuration details.
 
 # Error codes
 const ERR_UNKNOWN_METHOD := 1
@@ -37,8 +39,8 @@ const ERR_NOT_ALLOWED := 5
 ## requests or responses change.
 const ASSISTANT_PROTOCOL_VERSION := 5
 
-## Methods the server itself handles; the built-in tools handle the rest.
-const SERVER_METHODS: Array[String] = ["get_project_info", "describe", "get", "call", "quit"]
+## Methods the server itself handles; [IVAssistantDispatcher] handles the rest.
+const SERVER_METHODS: Array[String] = ["get_project_info", "quit"]
 
 ## Lifecycle roles a project may map to its own signals and methods in
 ## [code]AUTOMATION_LIFECYCLE[/code] (SPECIFICATION.md §11.6).
@@ -59,9 +61,7 @@ var _ready_delay_counter := -1 # -1 = predicate not yet true; 0..N = countdown
 ## Consecutive frames [member ready_predicate] must hold true before
 ## [member _is_ready] flips. Configured via [code]ivoyager_assistant.cfg[/code].
 var _min_ready_delay_frames := 10
-var _automation: IVAssistantAutomation
-var _godot_tools: IVAssistantGodotTools
-var _widgets: IVAssistantWidgets
+var _dispatcher: IVAssistantDispatcher
 var _lifecycle_object: Object # declares AUTOMATION_LIFECYCLE, or null
 var _quit_method := &""
 
@@ -75,15 +75,13 @@ var ready_predicate := func() -> bool: return true
 func _ready() -> void:
 	process_mode = PROCESS_MODE_ALWAYS
 	if OS.has_feature("web"):
-		# TCPServer isn't available on web, so the server can't listen here. Web
-		# accessibility support will need a different transport (e.g. WebSocket)
-		# when added; until then stay inert rather than erroring on a doomed listen().
+		# No TCPServer on the web: stay inert rather than error on a doomed listen().
 		set_process(false)
 		return
 	var config := IVAssistantPluginUtils.get_ivoyager_config(
 			"res://addons/ivoyager_assistant/ivoyager_assistant.cfg")
-	var enabled: bool = config.get_value("assistant", "enabled", true)
-	var debug_only: bool = config.get_value("assistant", "debug_only", true)
+	var enabled: bool = config.get_value("assistant_server", "enabled", true)
+	var debug_only: bool = config.get_value("assistant_server", "debug_only", true)
 	if !enabled:
 		print("IVAssistantServer: disabled by config")
 		set_process(false)
@@ -92,16 +90,14 @@ func _ready() -> void:
 		print("IVAssistantServer: skipping (not a debug build)")
 		set_process(false)
 		return
-	_port = config.get_value("assistant", "port", 29071)
+	_port = config.get_value("assistant_server", "port", 29071)
 	_apply_cmdline_user_args()
 	_assistant_name = config.get_value("assistant", "assistant_name", "")
-	_min_ready_delay_frames = config.get_value("assistant", "min_ready_delay_frames", 10)
+	_min_ready_delay_frames = config.get_value("assistant_server", "min_ready_delay_frames", 10)
 	var context_file: String = config.get_value("assistant", "context_file", "")
 	if context_file:
 		_context_content = _load_context_file(context_file)
-	_automation = IVAssistantAutomation.new(get_tree())
-	_godot_tools = IVAssistantGodotTools.new(get_tree(), _automation)
-	_widgets = IVAssistantWidgets.new(get_tree(), _automation)
+	_dispatcher = IVAssistantDispatcher.new(get_tree())
 	# Other autoloads may follow this one; the lifecycle declaration is read once all are in.
 	_connect_lifecycle.call_deferred()
 
@@ -115,7 +111,7 @@ func is_ready() -> bool:
 
 
 func _connect_lifecycle() -> void:
-	var found := _automation.find_lifecycle()
+	var found := _dispatcher.automation.find_lifecycle()
 	_lifecycle_object = found[0]
 	var lifecycle: Dictionary = found[1]
 	if !_lifecycle_object:
@@ -283,9 +279,7 @@ func _handle_request(line: String) -> String:
 			response = responses
 	else:
 		response = _handle_one(parsed)
-	# A discovered object held until the next request would outlive a reset in
-	# between, such as the procedural objects a load frees.
-	_automation.release()
+	_dispatcher.release()
 	return JSON.stringify(response)
 
 
@@ -337,20 +331,9 @@ func _dispatch(method: String, params: Dictionary) -> Variant:
 	match method:
 		"get_project_info":
 			return _get_project_info()
-		"describe":
-			return _describe(params)
-		"get":
-			return _automation.get_properties(params)
-		"call":
-			return _automation.call_method(params)
 		"quit":
 			return _quit(params)
-	if IVAssistantGodotTools.METHODS.has(method):
-		return _godot_tools.dispatch(method, params)
-	if IVAssistantWidgets.METHODS.has(method):
-		return _widgets.dispatch(method, params)
-	return {"_error": {"code": ERR_UNKNOWN_METHOD,
-			"message": "Unknown method: %s" % method}}
+	return _dispatcher.dispatch(method, params)
 
 
 # ===========================================================================
@@ -364,8 +347,7 @@ func _get_project_info() -> Dictionary:
 	# A declared member is described by "describe", not here.
 	var capabilities: Array[String] = []
 	capabilities.append_array(SERVER_METHODS)
-	capabilities.append_array(IVAssistantGodotTools.METHODS)
-	capabilities.append_array(IVAssistantWidgets.METHODS)
+	capabilities.append_array(IVAssistantDispatcher.get_methods())
 	capabilities.sort()
 	var display_name := _assistant_name if _assistant_name else project_name
 
@@ -384,19 +366,6 @@ func _get_project_info() -> Dictionary:
 		result["instance_id"] = _instance_id
 	if _context_content:
 		result["context"] = _context_content
-	return result
-
-
-# A client's whole context: declared objects, plus the user surface (the
-# widgets a user can see now, and input actions) unless asked to leave them out.
-func _describe(params: Dictionary) -> Dictionary:
-	var result := _automation.describe(params)
-	if params.get("widgets", true):
-		var widgets := _widgets.list_widgets({"visible_only": true})
-		result["widgets"] = widgets.get("widgets", [])
-	if params.get("actions", true):
-		var actions := _godot_tools.list_actions({})
-		result["actions"] = actions.get("actions", {})
 	return result
 
 

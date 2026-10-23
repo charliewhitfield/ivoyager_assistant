@@ -15,7 +15,7 @@ Goal 2 divides the work three ways:
 - **The plugin** provides the plumbing: connections to models and a setup wizard, the conversation loop that runs the model's tool calls through the declarations, and a chat box.
 - **The project** provides the assistant's personality, the tools it offers, which connections to offer, and the chat box's style and place. The Planetarium puts it in a panel at the bottom center.
 
-Goal 2 is planned (`CODING_PLAN.md` Phase 5); today the plugin serves goal 1.
+Goal 2 is under way (`CODING_PLAN.md` Phase 5): `IVAssistant` reaches the app in process in any build (§2.1), and connections to models, the conversation loop and the chat box are still to come.
 
 The plugin knows Godot, not the project. A project's classes declare what a client may read and call (§11), and the Assistant discovers and dispatches those declarations; so a change in Core or in a project needs no change here.
 
@@ -23,8 +23,10 @@ The plugin knows Godot, not the project. A project's classes declare what a clie
 
 ### 2.1 Integration with a project
 
-- **EditorPlugin** — Registers `IVAssistantServer` as an autoload via `add_autoload_singleton()` when the plugin is enabled, and removes it when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
-- **IVAssistantServer** — An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Inert in a web export, which has no `TCPServer`. It refers to no project class.
+- **EditorPlugin** — Registers the `IVAssistantServer` and `IVAssistant` autoloads via `add_autoload_singleton()` when the plugin is enabled, and removes them when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
+- **IVAssistantServer** — The test client's transport (goal 1). An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Runs only in debug builds unless configured otherwise, and is inert in a web export, which has no `TCPServer`. It refers to no project class.
+- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener.
+- **IVAssistantDispatcher** — Answers one request by its method: `describe`, `get`, `call` and the built-in tools. The server and `IVAssistant` each hold one, so a model's tool call takes the path a test client's request does.
 - **IVAssistantAutomation** — Discovers the objects that declare automation members and serves `describe`, `get` and `call` (§4.1, §4.2, §11).
 - **Built-in tools** — `IVAssistantWidgets` (list and operate widgets, §4.3) and `IVAssistantGodotTools` (screenshots, mouse, input actions, GUI inspection, §4.4–4.6). Both need only Godot.
 
@@ -35,18 +37,28 @@ EditorPlugin (editor/editor_plugin.gd)
   ├─ _enter_tree(): reads ivoyager_assistant.cfg, calls add_autoload_singleton()
   └─ IVAssistantExportPlugin: adds the doc-comment digest to exports (§11.5)
 
-IVAssistantServer (autoload Node, root-level singleton)
+IVAssistantServer (autoload Node, root-level singleton; the test client's)
   ├─ _ready(): reads config and command-line args, checks enabled/debug_only
   ├─ finds AUTOMATION_LIFECYCLE on an autoload and connects its signals (§11.6)
   ├─ on lifecycle "initialized": starts TCPServer on 127.0.0.1:<port> (§7.3)
   ├─ on lifecycle "started": begins evaluating the readiness gate (§7.4)
   └─ _process(): polls TCP, reads JSON requests (or batches), dispatches, writes responses
-       ├─ server: get_project_info, describe, get, call, quit
-       ├─ IVAssistantAutomation: discovery, addresses, conversion, availability (§11)
-       └─ built-in: IVAssistantWidgets (§4.3), IVAssistantGodotTools (§4.4–4.6)
+       ├─ server: get_project_info, quit
+       └─ IVAssistantDispatcher: everything else
+
+IVAssistant (autoload Node; the user's assistant, inert unless enabled)
+  └─ request(method, params): answers in process
+       └─ IVAssistantDispatcher: everything
+
+IVAssistantDispatcher (one per client)
+  ├─ describe, get, call
+  ├─ IVAssistantAutomation: discovery, addresses, conversion, availability (§11)
+  └─ built-in: IVAssistantWidgets (§4.3), IVAssistantGodotTools (§4.4–4.6)
 ```
 
 ### 2.3 Lifecycle
+
+This is the server's lifecycle. `IVAssistant` has none: once enabled, it answers on whatever exists, and a declared member's class says what is available now (§11.1).
 
 1. EditorPlugin registers `IVAssistantServer` as an autoload when the plugin is enabled.
 2. On game start, `IVAssistantServer._ready()` reads config and command-line overrides (§7.3) and checks `enabled`/`debug_only`. Once every autoload is in the tree, it finds the first autoload whose script declares `AUTOMATION_LIFECYCLE` (§11.6; in Core, `IVStateManager`) and connects to the signals it names.
@@ -72,7 +84,7 @@ For projects with `wait_for_start = true` (splash screens), there is a gap betwe
 ### 3.1 Transport
 
 - **TCP** on `localhost`, default port `29071`
-- Port configurable via `ivoyager_assistant.cfg` under `[assistant]` section, or per process on the command line (§7.3), so several instances can run on one machine
+- Port configurable via `ivoyager_assistant.cfg` under `[assistant_server]` section, or per process on the command line (§7.3), so several instances can run on one machine
 
 ### 3.2 Message Format
 
@@ -463,19 +475,23 @@ The server, `IVAssistantAutomation` and the built-in tools depend on Godot alone
 ```ini
 [assistant_autoload]
 IVAssistantServer="../assistant_server.gd"
+IVAssistant="../assistant/assistant.gd"
 
-[assistant]
-port=29071
+[assistant_server]
 enabled=true
 debug_only=true
+port=29071
+min_ready_delay_frames=10
+
+[assistant]
+enabled=false
 assistant_name=""
 context_file=""
-min_ready_delay_frames=10
 ```
 
 ### 7.1 Autoload Registration
 
-The `[assistant_autoload]` section declares autoloads managed by the EditorPlugin. When the plugin is enabled in Godot's Plugin manager, `IVAssistantServer` is registered as an autoload. Projects can negate the autoload by setting `IVAssistantServer=""` in `ivoyager_override.cfg`.
+The `[assistant_autoload]` section declares autoloads managed by the EditorPlugin. When the plugin is enabled in Godot's Plugin manager, `IVAssistantServer` and `IVAssistant` are registered as autoloads. Projects can negate either by setting it to `""` in `ivoyager_override.cfg`.
 
 ### 7.2 Project helpers
 
@@ -490,14 +506,20 @@ A member that needs frames to finish (a render, a capture) starts the work and r
 
 ### 7.3 Runtime Settings
 
-The `[assistant]` section controls runtime behavior:
+The `[assistant_server]` section controls the TCP server:
 
-- `port` — TCP listen port (default: 29071)
 - `enabled` — Master enable/disable (default: true). When false, the autoload node exists but does not start the TCP server.
-- `debug_only` — If true, server only starts when `OS.is_debug_build()` is true (default: true). The export digest of doc comments (§11.5) is added only to exports in which the server can run.
+- `debug_only` — If true, server only starts when `OS.is_debug_build()` is true (default: true).
+- `port` — TCP listen port (default: 29071)
+- `min_ready_delay_frames` — Number of consecutive frames the project's `ready_predicate` must return `true` (after the lifecycle "started" signal) before the readiness gate opens (default: 10). Allows projects with deferred main-thread work after start (e.g. cross-thread initialization arriving via `call_deferred`) to settle before save/load and similar operations are permitted. See §7.4.
+
+The `[assistant]` section configures the user's assistant, and the identity both clients are given:
+
+- `enabled` — Whether the project offers the user's assistant, `IVAssistant` (default: false). When true it runs in every build, release and web included.
 - `assistant_name` — Display name for the assistant persona (default: empty, uses project name from ProjectSettings)
 - `context_file` — Path to a text file (`res://` relative) with project-specific context for AI clients (default: empty)
-- `min_ready_delay_frames` — Number of consecutive frames the project's `ready_predicate` must return `true` (after the lifecycle "started" signal) before the readiness gate opens (default: 10). Allows projects with deferred main-thread work after start (e.g. cross-thread initialization arriving via `call_deferred`) to settle before save/load and similar operations are permitted. See §7.4.
+
+The export digest of doc comments (§11.5) is added to an export in which the user's assistant is enabled or the server can run, and to no other.
 
 Base values in `ivoyager_assistant.cfg` can be overridden per-project via `ivoyager_override.cfg` or `ivoyager_override2.cfg`.
 
@@ -551,7 +573,7 @@ Projects with `IVCoreSettings.wait_for_start = true` display a splash screen bef
 
 ### 8.3 Project Identity
 
-Projects can customize the assistant's identity via config:
+Projects can customize the assistant's identity via config, under `[assistant]`:
 - `assistant_name` — Gives the assistant a project-specific name
 - `context_file` — Points to a text file with background information, personality guidelines, or project-specific instructions for AI clients
 
@@ -725,7 +747,7 @@ A type with no JSON form above may be given as Godot prints it (`"Basis(...)"`).
 
 A declared member's `##` doc comment is its description, and a class's is its own: one copy, written from a caller's point of view, so doc-comment quality is part of what a client depends on. No runtime API exposes doc comments (Godot 4.7), so the Assistant parses them from source, as plain text with BBCode reduced to Markdown code spans.
 
-An export ships scripts as binary tokens, without comments. `IVAssistantExportPlugin` therefore parses every script that declares automation members, and the scripts they extend, when an export begins, and adds the result to the export as `res://addons/ivoyager_assistant/automation_docs.json`. At runtime the Assistant reads a script's source where it has one and the digest otherwise. An export in which the server can't run (§7.3) gets no digest.
+An export ships scripts as binary tokens, without comments. `IVAssistantExportPlugin` therefore parses every script that declares automation members, and the scripts they extend, when an export begins, and adds the result to the export as `res://addons/ivoyager_assistant/automation_docs.json`. At runtime the Assistant reads a script's source where it has one and the digest otherwise. An export gets the digest where the user's assistant is enabled or the server can run (§7.3), and no other does.
 
 ### 11.6 Lifecycle
 

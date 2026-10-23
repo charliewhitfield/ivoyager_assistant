@@ -24,24 +24,27 @@ extends EditorExportPlugin
 ## Adds the doc comments of every declaring script to an export.
 ##
 ## An export ships scripts without comments, so the descriptions
-## [code]describe[/code] gives would be lost. This parses the scripts that
-## declare automation members, and the scripts they extend, into
-## [constant IVAssistantDocs.DIGEST_PATH]. Exports in which the server can't run
-## (see [code]enabled[/code] and [code]debug_only[/code] in
-## [code]ivoyager_assistant.cfg[/code]) get no digest.
+## [code]describe[/code] gives, and the user's assistant reads, would be lost.
+## This parses the scripts that declare automation members, and the scripts they
+## extend, into [constant IVAssistantDocs.DIGEST_PATH]. An export gets it where
+## the user's assistant is enabled or the TCP server can run (see
+## [code]ivoyager_assistant.cfg[/code]), not otherwise.
 
 
 func _get_name() -> String:
 	return "IVAssistantAutomationDocs"
 
 
-func _export_begin(_features: PackedStringArray, is_debug: bool, _path: String, _flags: int
+func _export_begin(features: PackedStringArray, is_debug: bool, _path: String, _flags: int
 		) -> void:
 	var config := IVAssistantPluginUtils.get_ivoyager_config(
 			"res://addons/ivoyager_assistant/ivoyager_assistant.cfg")
-	var enabled: bool = config.get_value("assistant", "enabled", true)
-	var debug_only: bool = config.get_value("assistant", "debug_only", true)
-	if !enabled or (debug_only and !is_debug):
+	var assistant_enabled: bool = config.get_value("assistant", "enabled", false)
+	var server_enabled: bool = config.get_value("assistant_server", "enabled", true)
+	var server_debug_only: bool = config.get_value("assistant_server", "debug_only", true)
+	var server_runs := (server_enabled and (is_debug or !server_debug_only)
+			and !features.has("web"))
+	if !assistant_enabled and !server_runs:
 		return
 	var tree: SceneTree = Engine.get_main_loop()
 	var automation := IVAssistantAutomation.new(tree)

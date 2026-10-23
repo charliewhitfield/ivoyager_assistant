@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Next: the assistant (Phase 5).
+v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Step 5.1 is done, 5.2 is next.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -37,19 +37,20 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
 
 **Goal:** goal 2 of `SPECIFICATION.md` §1. A user talks, by text or voice, with an AI of their choosing, which operates the app for them through the same declarations a test client uses (§11). It works in any build, the web included.
 
-No API is designed yet. The division of the work is settled:
+Each step's API is designed when the step is built. The division of the work is settled:
 
 - **The model is never part of the plugin.** It is a remote service, a local server the user runs (Ollama, LM Studio), or a server a project ships beside its app (5.8).
 - **The plugin** provides connections to models and a setup wizard, the conversation loop, tool definitions generated from declared members, and a chat box.
-- **The project** provides the assistant's personality, the tools it offers, which connections to offer (or one preset), and the chat box's theme and place. The Planetarium puts it in a panel at the bottom center.
+- **The project** provides the assistant's personality, the tools it offers, which connections to offer (or one preset), and the chat box's theme and place. The Planetarium names its assistant Galileo and puts it in a panel at the bottom center.
 
 The steps are in build order. The Planetarium is the first project to get an assistant, so the steps it needs come first, and a model shipped with an app (5.8) comes last. Facts about outside services below are as of October 2026; recheck them when the step is built.
 
-### Step 5.1: An in-process client in shipped builds
+### Step 5.1: An in-process client in shipped builds — done
 
-- The conversation loop calls `IVAssistantAutomation` directly, without TCP, so it runs in release builds and in a web export.
-- Enable the assistant apart from the TCP server: the server stays debug-only and inert on the web; the assistant runs wherever the project enables it.
-- Add the doc-comment digest (§11.5) to every export the assistant runs in, not only those the server can run in: the comments are the tool descriptions the model reads.
+- `IVAssistant`, a second autoload, is the user's assistant. `[assistant] enabled` turns it on, and it runs in every build; its `request(method, params)` answers in process what a TCP client would be answered. The conversation loop (5.5) calls it.
+- `IVAssistantDispatcher` answers a request by its method (`describe`, `get`, `call`, the built-in tools). The server and `IVAssistant` each hold one, so a model's tool call takes a test client's path. Until 5.2 restricts it, `request` answers everything the server does.
+- The server's keys moved to `[assistant_server]`; it stays debug-only and inert on the web. `[assistant]` keeps `assistant_name` and `context_file`, which both clients are given.
+- The doc-comment digest (§11.5) goes into every export where the assistant is enabled or the server can run, and no other.
 
 ### Step 5.2: What an assistant may call
 
@@ -62,7 +63,7 @@ The steps are in build order. The Planetarium is the first project to get an ass
 - `describe` runs to ~90 KB in the Planetarium, ~25K tokens. A large remote model takes that, and a provider's prompt cache makes resending it cheap; a small local model chooses well among 10–20 tools. So a project's tool list may differ by model size.
 - Tools that look up the project's own data (the Planetarium's tables) let the model answer from the app rather than its memory, which matters most for a small model.
 - A text description of the current view (selection, what is in frame, time, speed), declared once, serves both the assistant and a screen reader's announcements.
-- The personality is the model's instructions, with `assistant_name`; `context_file` (§8.3) grows into it.
+- The personality is the model's instructions, with `assistant_name`; `context_file` (§8.3) grows into it. The Planetarium's `assistant_context.txt` is written for a test client (probes, screenshots, `suppress_caching`), not for Galileo, so the two need separate texts or one split in two.
 
 ### Step 5.4: Connections and the setup wizard
 
