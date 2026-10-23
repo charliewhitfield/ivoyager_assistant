@@ -30,6 +30,7 @@ Under development using Godot 4.7.2.
 * `tools/orbit_accuracy_test.py` compared simulator positions with Horizons kilometers unconverted, off by a factor of 1000 since the Planetarium's `METER` became 1; it converts by the declared `IVUnits.KM`.
 * `tools/orbit_accuracy_test.py` could not test a project that waits at its splash screen (`IVCoreSettings.wait_for_start`, as in the Project Template); it now calls `IVStateManager.start`.
 * `tools/assistant_test.py --launch` ran a hard-coded Godot executable unless given `--godot`; it now runs the newest build of the project's Godot major, chosen by new `tools/godot_executable.py`, which every launching script shares and which refuses rather than open the project with another major.
+* An editor start could print `Unrecognized UID` and `Failed to create an autoload` errors: the editor plugin re-added its autoload while the editor's first file scan had emptied the UID database. It now waits for the scan to end.
 
 
 ## [v0.0.4] - 2026-10-15

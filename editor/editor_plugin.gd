@@ -56,6 +56,11 @@ func _enter_tree() -> void:
 			"ivoyager_assistant", " - https://ivoyager.dev")
 	_config = IVAssistantPluginUtils.get_ivoyager_config(
 			"res://addons/ivoyager_assistant/ivoyager_assistant.cfg")
+	# The editor's first file scan empties the UID database until it ends, and an
+	# autoload added meanwhile fails to load every autoload from its UID.
+	var filesystem := EditorInterface.get_resource_filesystem()
+	while filesystem.is_scanning():
+		await get_tree().process_frame
 	_add_autoloads()
 	_export_plugin = IVAssistantExportPlugin.new()
 	add_export_plugin(_export_plugin)
