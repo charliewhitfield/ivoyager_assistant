@@ -31,6 +31,8 @@ extends RefCounted
 const METHODS: Array[String] = ["screenshot", "warp_mouse", "get_mouse_position",
 		"project_to_screen", "list_actions", "press_action", "find_nodes", "inspect_node",
 		"read_node_text"]
+## Those a user's assistant may use: the keyboard user's surface.
+const USER_METHODS: Array[String] = ["list_actions", "press_action"]
 
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2

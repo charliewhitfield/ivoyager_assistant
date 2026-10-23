@@ -25,29 +25,36 @@ extends RefCounted
 ##
 ## The TCP server answers its clients through one, and the user's assistant
 ## the model's tool calls through another, so both reach the app by the same
-## path. Needs only Godot. See SPECIFICATION.md §2.1 and §4.
+## path. The user's assistant's dispatcher answers on the user's surface alone:
+## the members classes mark as the user's, widgets and input actions. Needs only
+## Godot. See SPECIFICATION.md §2.1, §4 and §11.1.
 
 const ERR_UNKNOWN_METHOD := 1
 
 ## The methods answered here; the built-in tools answer theirs.
 const METHODS: Array[String] = ["describe", "get", "call"]
 
+## Answers only on the user's surface, for the user's assistant. Set at construction.
+var user_only := false
 var automation: IVAssistantAutomation
 var godot_tools: IVAssistantGodotTools
 var widgets: IVAssistantWidgets
 
 
-## Every method [method dispatch] answers.
-static func get_methods() -> Array[String]:
+## Every method [method dispatch] answers, or with [param user] those a user's
+## assistant may use.
+static func get_methods(user := false) -> Array[String]:
 	var methods: Array[String] = []
 	methods.append_array(METHODS)
-	methods.append_array(IVAssistantGodotTools.METHODS)
-	methods.append_array(IVAssistantWidgets.METHODS)
+	methods.append_array(IVAssistantGodotTools.USER_METHODS if user
+			else IVAssistantGodotTools.METHODS)
+	methods.append_array(IVAssistantWidgets.USER_METHODS if user else IVAssistantWidgets.METHODS)
 	return methods
 
 
-func _init(tree: SceneTree) -> void:
-	automation = IVAssistantAutomation.new(tree)
+func _init(tree: SceneTree, is_user_only := false) -> void:
+	user_only = is_user_only
+	automation = IVAssistantAutomation.new(tree, is_user_only)
 	godot_tools = IVAssistantGodotTools.new(tree, automation)
 	widgets = IVAssistantWidgets.new(tree, automation)
 
@@ -56,6 +63,10 @@ func _init(tree: SceneTree) -> void:
 ## [code]{"_error": {"code": ..., "message": ...}}[/code] (SPECIFICATION.md §3.3).
 ## Call [method release] once a request, or a batch of them, is answered.
 func dispatch(method: String, params: Dictionary) -> Variant:
+	if user_only and !get_methods(true).has(method):
+		return {"_error": {"code": ERR_UNKNOWN_METHOD,
+				"message": "Unknown method: %s (methods: %s)" % [method,
+				", ".join(get_methods(true))]}}
 	match method:
 		"describe":
 			return describe(params)

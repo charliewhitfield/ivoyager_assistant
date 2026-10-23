@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Step 5.1 is done, 5.2 is next.
+v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 and 5.2 are done, 5.3 is next.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -30,7 +30,7 @@ For the per-method addition history, see `CHANGELOG.md`. For the protocol and co
 ## Open, not blocking
 
 - A widget that updates itself a frame later (the focal-length spin box, a popup button) echoes its old state from `operate_widget`. Replying a frame later would fix it at the cost of a deferred response path in the server.
-- `describe` with widgets runs to ~90 KB in the Planetarium, most of it the 45 navigation buttons and the per-member doc comments; a client that needs less passes `widgets: false` or reads `list_widgets` filtered.
+- `describe` with widgets runs to ~110 KB in the Planetarium (~70 KB with `user`), most of it the 45 navigation buttons and the per-member doc comments; a client that needs less passes `widgets: false` or reads `list_widgets` filtered.
 - Godot-native members a class declares (`name`, `global_position`, `visible`) have no description; the class reference isn't available at runtime.
 
 ## Next: Phase 5 — Assistant
@@ -48,19 +48,19 @@ The steps are in build order. The Planetarium is the first project to get an ass
 ### Step 5.1: An in-process client in shipped builds — done
 
 - `IVAssistant`, a second autoload, is the user's assistant. `[assistant] enabled` turns it on, and it runs in every build; its `request(method, params)` answers in process what a TCP client would be answered. The conversation loop (5.5) calls it.
-- `IVAssistantDispatcher` answers a request by its method (`describe`, `get`, `call`, the built-in tools). The server and `IVAssistant` each hold one, so a model's tool call takes a test client's path. Until 5.2 restricts it, `request` answers everything the server does.
+- `IVAssistantDispatcher` answers a request by its method (`describe`, `get`, `call`, the built-in tools). The server and `IVAssistant` each hold one, so a model's tool call takes a test client's path.
 - The server's keys moved to `[assistant_server]`; it stays debug-only and inert on the web. `[assistant]` keeps `assistant_name` and `context_file`, which both clients are given.
 - The doc-comment digest (§11.5) goes into every export where the assistant is enabled or the server can run, and no other.
 
-### Step 5.2: What an assistant may call
+### Step 5.2: What an assistant may call — done
 
-- `surface` (§4.2) marks only `Control`s as the user's. Also mark the declared methods a user's assistant may call: the widget-level entry points of §10, never a marked exception (`IVCameraHandler.move_to`) or a test probe.
-- The assistant's own chat box is not a widget it operates.
+- Classes mark the user's members in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (§11.1): the widget-level entry points of §10 and what a user sees, never a marked exception (`IVCameraHandler.move_to`), a test probe or a raw internal. Marking is opt-in, so an unmarked member is kept from the assistant. Core, Units and the Planetarium's `units.gd` mark theirs.
+- `IVAssistant` reaches only the user's surface: the marked members, the widgets and the input actions. `describe` marks each user member, and with `user` lists those alone, which is what the assistant is given.
 
 ### Step 5.3: The project's tools and personality
 
 - A project names the declared members its assistant is offered, and adds tools of its own as members of its own classes (§7.2, as the Planetarium's probes are).
-- `describe` runs to ~90 KB in the Planetarium, ~25K tokens. A large remote model takes that, and a provider's prompt cache makes resending it cheap; a small local model chooses well among 10–20 tools. So a project's tool list may differ by model size.
+- `describe` of the user's surface runs to ~70 KB in the Planetarium, ~20K tokens. A large remote model takes that, and a provider's prompt cache makes resending it cheap; a small local model chooses well among 10–20 tools. So a project's tool list may differ by model size.
 - Tools that look up the project's own data (the Planetarium's tables) let the model answer from the app rather than its memory, which matters most for a small model.
 - A text description of the current view (selection, what is in frame, time, speed), declared once, serves both the assistant and a screen reader's announcements.
 - The personality is the model's instructions, with `assistant_name`; `context_file` (§8.3) grows into it. The Planetarium's `assistant_context.txt` is written for a test client (probes, screenshots, `suppress_caching`), not for Galileo, so the two need separate texts or one split in two.
@@ -76,7 +76,7 @@ The steps are in build order. The Planetarium is the first project to get an ass
 ### Step 5.5: The conversation loop and the chat box
 
 - The loop keeps the conversation and sends the instructions, tool definitions and history, stable parts first so a provider's prompt cache holds. It runs each tool call on the main thread as `call` does, returns a refusal (§3.3) to the model as the tool's error, and repeats until the model answers. It emits signals the chat box follows, and can be cancelled.
-- The chat box is a widget a project themes and places. Replies go to an accessibility live region, so a screen reader reads them as they arrive; speaking them through `DisplayServer.tts_speak` is optional.
+- The chat box is a widget a project themes and places. The assistant doesn't operate it: the user's widget listing skips it (the rest of 5.2). Replies go to an accessibility live region, so a screen reader reads them as they arrive; speaking them through `DisplayServer.tts_speak` is optional.
 
 ### Step 5.6: MCP
 

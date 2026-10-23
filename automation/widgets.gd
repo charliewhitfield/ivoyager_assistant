@@ -30,6 +30,8 @@ extends RefCounted
 
 ## The methods these tools handle, by their protocol names.
 const METHODS: Array[String] = ["list_widgets", "operate_widget"]
+## Those a user's assistant may use: all of them.
+const USER_METHODS: Array[String] = ["list_widgets", "operate_widget"]
 
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2

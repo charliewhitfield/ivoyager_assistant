@@ -10,7 +10,7 @@ File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Under development using Godot 4.7.2.
 
 ### Added
-* `IVAssistant`, a second autoload: the user's assistant, turned on by `[assistant] enabled`, which answers requests in process in any build, release and web included, through new `IVAssistantDispatcher`, as the TCP server now does. It starts Phase 5; see SPECIFICATION.md §2.1.
+* `IVAssistant`, a second autoload: the user's assistant, turned on by `[assistant] enabled`, which answers requests in process in any build, release and web included, through new `IVAssistantDispatcher`, as the TCP server now does. It reaches only the user's surface: the members a class marks in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (which `describe` marks, and with `user` lists alone), the widgets and the input actions. It starts Phase 5; see SPECIFICATION.md §2.1 and §11.1.
 * Automation: a class declares what a client may read and call (`AUTOMATION_*` constants, `is_automation_available()`, `get_automation_objects()`), and new methods `describe`, `get` and `call` discover and use those declarations through Godot alone, converting JSON by the declared types. See SPECIFICATION.md §11 and §4.1–4.2.
 * Methods `list_widgets` and `operate_widget`, which list a user's controls by their accessibility names and keys and operate them as a user does, a composite widget through its declared value interface. See SPECIFICATION.md §4.3 and §11.7.
 * JSON-RPC 2.0 batch requests, answered in order within one frame.

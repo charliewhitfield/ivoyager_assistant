@@ -24,7 +24,9 @@ extends Node
 ##
 ## It reaches the app in process, through the same declarations and dispatch a
 ## test client's requests use ([IVAssistantDispatcher]), so it runs in any
-## build, release and web included. Inert unless the project enables it in
+## build, release and web included. It sees only the user's surface: the
+## members classes mark as the user's, widgets and input actions
+## (SPECIFICATION.md §11.1). Inert unless the project enables it in
 ## [code]ivoyager_assistant.cfg[/code] under [code][assistant][/code]. See
 ## SPECIFICATION.md §1 and §2, and CODING_PLAN.md Phase 5 for the parts still
 ## to come: connections to models, the conversation loop and the chat box.
@@ -47,7 +49,7 @@ func _ready() -> void:
 	var enabled: bool = config.get_value("assistant", "enabled", false)
 	if !enabled:
 		return
-	_dispatcher = IVAssistantDispatcher.new(get_tree())
+	_dispatcher = IVAssistantDispatcher.new(get_tree(), true)
 
 
 ## Whether the project enables the assistant.
@@ -56,9 +58,10 @@ func is_enabled() -> bool:
 
 
 ## Answers [param method] in process, as the TCP server answers a client's
-## request: [code]describe[/code], [code]get[/code], [code]call[/code] or a
-## built-in tool, with [param params] as JSON would give them (SPECIFICATION.md
-## §4). Returns the result, or a Dictionary
+## request but on the user's surface alone: [code]describe[/code],
+## [code]get[/code], [code]call[/code], the widgets or the input actions, with
+## [param params] as JSON would give them (SPECIFICATION.md §4). Returns the
+## result, or a Dictionary
 ## [code]{"_error": {"code": ..., "message": ...}}[/code] (§3.3). Call it on
 ## the main thread.
 func request(method: String, params := {}) -> Variant:

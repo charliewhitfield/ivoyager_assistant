@@ -25,7 +25,7 @@ The plugin knows Godot, not the project. A project's classes declare what a clie
 
 - **EditorPlugin** — Registers the `IVAssistantServer` and `IVAssistant` autoloads via `add_autoload_singleton()` when the plugin is enabled, and removes them when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
 - **IVAssistantServer** — The test client's transport (goal 1). An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Runs only in debug builds unless configured otherwise, and is inert in a web export, which has no `TCPServer`. It refers to no project class.
-- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener.
+- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener. It reaches only the user's surface: the members classes mark as the user's (§11.1), the widgets (§4.3) and the input actions (`list_actions`, `press_action`).
 - **IVAssistantDispatcher** — Answers one request by its method: `describe`, `get`, `call` and the built-in tools. The server and `IVAssistant` each hold one, so a model's tool call takes the path a test client's request does.
 - **IVAssistantAutomation** — Discovers the objects that declare automation members and serves `describe`, `get` and `call` (§4.1, §4.2, §11).
 - **Built-in tools** — `IVAssistantWidgets` (list and operate widgets, §4.3) and `IVAssistantGodotTools` (screenshots, mouse, input actions, GUI inspection, §4.4–4.6). Both need only Godot.
@@ -199,13 +199,14 @@ Errors: an unknown address is code 3 (an ambiguous one code 2, listing the candi
 
 ### 4.2 `describe`
 
-A client's whole context in one call: every declared object and class, with each member's signature and description, the enum values members use, which members are unavailable now, and the user surface — the widgets a user can see and the input actions. All of it is generated from the running app, so anything absent is something the project does not offer, or does not offer now.
+A client's whole context in one call: every declared object and class, with each member's signature and description, which members are the user's, the enum values members use, which members are unavailable now, and the widgets a user can see and the input actions. All of it is generated from the running app, so anything absent is something the project does not offer, or does not offer now.
 
 **Params:**
 - `full` (bool, optional, default `false`) — Full class descriptions, rather than each class's first paragraph.
 - `instances` (bool, optional, default `true`) — List each instance of a keyed class.
 - `widgets` (bool, optional, default `true`) — Include the visible widgets (as `list_widgets` with `visible_only`).
 - `actions` (bool, optional, default `true`) — Include the input actions (as `list_actions`).
+- `user` (bool, optional, default `false`) — Only the user's surface: the members marked as the user's (§11.1), on the objects and classes that have any. It is what the user's assistant is given, which can't ask for more.
 
 **Result (abbreviated):**
 ```json
@@ -214,12 +215,12 @@ A client's whole context in one call: every declared object and class, with each
     "Timekeeper": {
       "class": "IVTimekeeper",
       "description": "Maintains simulator \"time\" (TT; J2000 epoch), Julian Day Number, ...",
-      "surface": "test",
       "methods": {
         "set_time": {"description": "Sets `time` and emits `time_set`. ...",
             "args": [{"name": "new_time", "type": "float"}], "returns": "void"}
       },
-      "properties": {"time": {"type": "float", "description": "Terrestrial Time (TT) ..."}}
+      "properties": {"time": {"type": "float", "description": "Terrestrial Time (TT) ...",
+          "user": true}}
     },
     "IVStateManager": {"class": "IVStateManager", "...": "...", "unavailable": ["start", "exit"]}
   },
@@ -237,7 +238,7 @@ A client's whole context in one call: every declared object and class, with each
 - `objects` — single objects by address: an autoload's name, a role a declaring object names (§11.2), or a class with one instance. `classes` — classes with several instances (keyed, §11.3), and classes that declared members hold or return (`reached_by`), which a client reads as values or addresses with `via`.
 - A method's `args` list each argument's `name`, `type`, `optional`, and `default` where the default is known. Types read as Godot names them: `"float"`, `"Vector3"`, `"Array[StringName]"`, `"IVBody"`, an enum's `"Class.Enum"`, `"Variant"`, `"void"`.
 - `description` is the member's or class's doc comment (§11.5). A Godot-native member a class declares (`name`, `global_position`, `visible`) has none.
-- `surface` is `"user"` for a `Control` — what a user operates or sees — and `"test"` otherwise. The user surface is what a user's assistant (§1) operates; the test surface reaches state however the GUI looks.
+- `user` is `true` on a member a class marks as the user's (§11.1): what a user's assistant (§1) may use. The rest is the test surface, which reaches state however the GUI looks.
 - `unavailable` — declared members the class says can't be used now (§11.1). For a keyed class, per instance.
 - `enums` — each enum a member's type names, and each enum constant of a declaring class, by name.
 
@@ -663,6 +664,8 @@ Declaring a member below that surface is a deliberate, marked exception, and its
 
 A class that adds a write-side member should add a row here and declare it at the widget level.
 
+**The user's members.** A user's assistant may call a widget-level entry point, and read what a user sees (the selection, the date, a body's radius, a view's state), so a class marks those as the user's in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (§11.1). A marked exception never is, nor is a test probe, nor a raw internal a widget doesn't show (`IVCamera.view_position`, `IVStateManager.building_system`). A write method no widget calls, such as `IVTimekeeper.set_time`, stays the test client's, as do the bulk HUD setters above.
+
 ## 11. Automation: classes declare their own interaction
 
 Any class — a Core singleton or program object, a tree node, a widget, or a project's own — declares what a client may read and call. The Assistant reads the declarations through Godot alone; nothing in a declaring class refers to the Assistant. This is the `PERSIST_*` pattern of the Save plugin: the class declares, a scanner reads. Core's declarations are the templates a project follows.
@@ -673,22 +676,25 @@ Constants are prefixed `AUTOMATION_`; methods carry `automation` after Godot's v
 
 - `const AUTOMATION_METHODS: Array[StringName]` — methods a client may call.
 - `const AUTOMATION_PROPERTIES: Array[StringName]` — properties a client may read: `var`s, getters, Godot-native properties (`global_position`, `visible`) or constants (`IVUnits.KM`). Writes go through methods.
+- `const AUTOMATION_USER_METHODS: Array[StringName]`, `const AUTOMATION_USER_PROPERTIES: Array[StringName]` — methods and properties that are also the user's: a user's assistant may use them, and no others (§10). They are declared members like the rest, so a member is listed once, here or in the lists above. Marking is opt-in, so a member a class forgets to mark is kept from the user's assistant, never exposed to it.
 - `const AUTOMATION_KEY: Array[StringName]` — for a class with several instances, the properties that tell one from another (`IVBody`: `name`; `IVNavButton`: `body_name`; `IVHUDsCheckBox`: `hud_type`, `body_flags`, `sbg_aliases`). A class with one instance needs none. Key properties are readable whether or not they are also in `AUTOMATION_PROPERTIES`.
 - `func is_automation_available(member: StringName) -> bool` — the class's own gates: whether a client may use `member` now. A member the class says is unavailable is listed under `unavailable` in `describe` and refused with code 5. Without this method every declared member is available.
 - `func get_automation_objects() -> Dictionary[StringName, Object]` — further objects, by role name. `IVGlobal` returns its `program` dictionary, so program objects are found under a role (`"SpeedManager"`) that survives a project substituting its own class; `IVTopUI` returns its selection manager as `"SelectionManager"`.
 - `const AUTOMATION_LIFECYCLE: Dictionary[StringName, StringName]` — on one autoload, the project's lifecycle (§11.6).
 - Widgets only: `get_automation_value()`, `set_automation_value(value)` and `get_automation_options()` (§11.7).
 
-A subclass can't redeclare a parent's constant, so, as with `PERSIST_PROPERTIES2`, it adds `AUTOMATION_METHODS2`, `AUTOMATION_PROPERTIES2` (any numeric suffix); the Assistant unions every level. A subclass may withdraw an inherited member by overriding `is_automation_available()`.
+A subclass can't redeclare a parent's constant, so, as with `PERSIST_PROPERTIES2`, it adds `AUTOMATION_METHODS2`, `AUTOMATION_USER_PROPERTIES2` and so on (any numeric suffix); the Assistant unions every level. A subclass may withdraw an inherited member by overriding `is_automation_available()`.
 
 ```gdscript
 # timekeeper.gd
-const AUTOMATION_METHODS: Array[StringName] = [
-	&"set_time",
-	&"set_time_from_date_clock_elements",
+const AUTOMATION_USER_METHODS: Array[StringName] = [
+	&"set_time_from_date_clock_elements", # the time setter widget's entry point
+	&"set_operating_system_time_sync",
 	...
 ]
-const AUTOMATION_PROPERTIES: Array[StringName] = [&"time", &"julian_day_number", ...]
+const AUTOMATION_USER_PROPERTIES: Array[StringName] = [&"time", &"julian_day_number", ...]
+const AUTOMATION_METHODS: Array[StringName] = [&"set_time", &"synchronize_with_operating_system"]
+const AUTOMATION_PROPERTIES: Array[StringName] = [&"clock_time"]
 
 ## Whether an automation client may use [param member] now: setting time needs
 ## [member IVCoreSettings.allow_time_setting] and is never done by a network client.
@@ -800,7 +806,8 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 ### 11.8 Writing declarations
 
 - Declare the entry point a GUI widget calls (§10); a member below it is a marked exception whose doc comment says so.
+- Mark as the user's the widget-level entry points and what a user sees (§10), and nothing else: a remote model may drive a user's assistant, so what it may do is no more than what the user's own GUI does.
 - The doc comment is the description a client reads: say what the member does and when it does nothing, in a caller's terms.
 - Gate in `is_automation_available()` what would otherwise silently do nothing (`IVSelectionManager.select_up` with nothing above, `IVStateManager.start` once started, setting time where it isn't allowed); a method that can't tell from its arguments alone returns whether it acted (`IVSelectionManager.select_by_name`, `IVTimekeeper.set_time_from_date_clock_elements`).
-- A value a client reads but never addresses (an orbit's elements, a view's state) needs only `AUTOMATION_PROPERTIES`; it is read through the object that holds it.
+- A value a client reads but never addresses (an orbit's elements, a view's state) needs only properties; it is read through the object that holds it.
 - A project declares the same way: `planetarium/units.gd` declares the unit constants a client converts by, and a project's replacement for a Core class declares its own members.
