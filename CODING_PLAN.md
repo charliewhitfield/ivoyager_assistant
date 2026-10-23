@@ -2,7 +2,7 @@
 
 ## Status
 
-v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 to 5.3 are done, 5.4 is next.
+v0.0.5.dev. Classes declare their own Assistant interaction (automation, `SPECIFICATION.md` §11), and the Assistant discovers and dispatches it — `describe`, `get`, `call`, batches, widget listing and operation — knowing only Godot. The earlier suites are removed. Phase 5, the user's assistant, is under way: Steps 5.1 to 5.4 are done, 5.5 is next.
 
 For the per-method addition history, see `CHANGELOG.md`. For the protocol and configuration reference, see `SPECIFICATION.md`.
 
@@ -64,19 +64,20 @@ The steps are in build order. The Planetarium is the first project to get an ass
 - Core: `IVSelectionData.get_body_data` gives the data panel's rows for any body, and `IVViewManager.get_view_description` says what the user sees (selection, camera, bodies in view, date, time and speed), both as text in the user's language, for a screen reader as for an assistant.
 - The Planetarium: `BodyFinder.find_bodies`, from a user's words to a body's key, and Galileo's instructions (`planetarium/galileo_instructions.txt`).
 
-### Step 5.4: Connections and the setup wizard
+### Step 5.4: Connections and the setup wizard — done
 
-- Two adapters cover nearly every model: OpenAI-compatible chat completions with tools (Ollama, LM Studio and llama.cpp's `llama-server` locally; OpenRouter, Groq, Gemini's compatibility endpoint and OpenAI remotely), and Anthropic's Messages API. A project may add its own adapter. An adapter adjusts the tool definitions' JSON Schema for a provider that takes only part of it (`anyOf`, a schema without a type for a `Variant` argument).
-- A connection chooses one of the project's tool sets (§12.2), by the model's size.
-- The wizard finds local servers (Ollama on port 11434, LM Studio on 1234) and lists their models, or takes a provider and the user's key; either way it confirms the connection with one test tool call. A project offers a subset, or presets one connection and hides the wizard.
-- Keys are the user's own, stored under `user://`; the wizard says so.
-- Web: `HTTPRequest` runs on the browser's `fetch`, so a service must accept calls from a page (CORS). Anthropic does with the `anthropic-dangerous-direct-browser-access` header, and OpenRouter does. A local Ollama needs `OLLAMA_ORIGINS` set to the page's origin and the browser's local-network permission. Chrome's built-in model (the Prompt API, Gemini Nano) is free and on-device, but desktop Chrome only, with more than 4 GB of video memory: a candidate for a small assistant on the web.
-- Consumer chat subscriptions don't include API access; Anthropic's terms reserve Pro and Max for its own apps. OpenAI's "Sign in with ChatGPT" plan usage lets an app spend a subscriber's allowance, so far for launch partners only. A subscription reaches the app today through MCP (5.6).
+- `IVAssistantConnection` is a connection to one model and the adapter for its API: `IVAssistantOpenAIConnection` for OpenAI-compatible chat completions (local servers and most services), `IVAssistantAnthropicConnection` for Anthropic's Messages API; a project adds its own by script path. A conversation is kept in the provider's own message form, so what a model returns goes back unchanged. With `simple_schemas` the tool definitions are simplified for a provider that takes only part of JSON Schema (Gemini), and arguments sent as JSON text are turned back into values (§12.4).
+- `IVAssistantConnections` holds the providers, one config section each (`[assistant_provider_<id>]`), the user's connection and remembered keys (`user://assistant/connection.cfg`, unencrypted, the key only if the user asks). A connection gets `small_model_tool_set` or `large_model_tool_set` by its provider's `small_models`. A project offers a subset, or presets one provider and hides the wizard.
+- `IVAssistantSetupWizard` finds the local servers (Ollama, LM Studio, `llama-server`) and lists their models, or lists a service's once a key is given, and saves a connection only once one test tool call (`IVAssistant.test_connection`) confirms it. The user's assistant can't see or operate it (`IVAssistantWidgets.PRIVATE_GROUP`), and a secret field reports no text to any client.
+- Core's `IVOptionsPopup.add_button()` puts a project's button in an options section; the Planetarium's opens the wizard, marked experimental, with Galileo on the compact tools for a small model and the compact plus generic tools for a large one.
+- Checked against a mock server of both APIs (adapters, errors, the test call, schema simplification, key storage, the wizard through the options popup); not yet against a real provider.
+- Facts as of October 2026 (§12.4): Anthropic's Max (5x: $100, 20x: $200 a month) and Team plans include API credits, claimed in claude.ai under Settings, Billing by linking a Console organization; any key of that organization spends them, in any app. Poe's subscribers spend their points through its OpenAI-compatible API. Gemini and Groq have free tiers; OpenRouter has free models within daily limits. GitHub Models was retired in July 2026. A web page reaches the plugin's services directly (CORS), and a local server only with the browser's local-network permission and the server's own setting.
+- Open: the wizard's text is English only (it isn't in a translation table), and a wizard taller than the view doesn't scroll. When the assistant is no longer experimental, a project may offer the wizard early on opening the app, with "don't show again".
 
 ### Step 5.5: The conversation loop and the chat box
 
 - The loop keeps the conversation and sends the instructions, tool definitions and history, stable parts first so a provider's prompt cache holds. It runs each tool call on the main thread as `call` does, returns a refusal (§3.3) to the model as the tool's error, and repeats until the model answers. It emits signals the chat box follows, and can be cancelled.
-- The chat box is a widget a project themes and places. The assistant doesn't operate it: the user's widget listing skips it (the rest of 5.2). Replies go to an accessibility live region, so a screen reader reads them as they arrive; speaking them through `DisplayServer.tts_speak` is optional.
+- The chat box is a widget a project themes and places. The assistant doesn't operate it: it joins `IVAssistantWidgets.PRIVATE_GROUP`, which the user's widget listing skips. Replies go to an accessibility live region, so a screen reader reads them as they arrive; speaking them through `DisplayServer.tts_speak` is optional.
 
 ### Step 5.6: MCP
 

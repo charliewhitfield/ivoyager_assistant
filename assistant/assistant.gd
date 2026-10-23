@@ -27,13 +27,25 @@ extends Node
 ## build, release and web included. It sees only the user's surface: the
 ## members classes mark as the user's, widgets and input actions
 ## (SPECIFICATION.md §11.1). A model is given [member instructions] and a tool
-## set ([method get_tool_set]), which the project names. Inert unless the
-## project enables it in [code]ivoyager_assistant.cfg[/code] under
+## set ([method get_tool_set]), which the project names, through the user's
+## connection ([member connections]), which the setup wizard makes. Inert
+## unless the project enables it in [code]ivoyager_assistant.cfg[/code] under
 ## [code][assistant][/code]. See SPECIFICATION.md §12, and CODING_PLAN.md
-## Phase 5 for the parts still to come: connections to models, the
-## conversation loop and the chat box.
+## Phase 5 for the parts still to come: the conversation loop and the chat box.
 
 const ERR_NOT_ALLOWED := 5
+## The tool a connection test asks the model to call, beside its tool set's.
+const TEST_TOOL := {
+	"name": "confirm_connection",
+	"description": "Confirms that the app can reach you. Call it when the app asks.",
+	"parameters": {"type": "object", "properties": {
+		"greeting": {"type": "string",
+				"description": "One short sentence greeting the person you will help."},
+	}, "required": ["greeting"]},
+}
+const TEST_REQUEST := ("This is a test of your connection to the app, sent by the app itself."
+		+ " Call the tool confirm_connection with a short greeting for the person you will"
+		+ " be helping. Call no other tool.")
 
 ## The assistant's display name: [code]assistant_name[/code] in the config,
 ## else the project's name.
@@ -41,9 +53,13 @@ var assistant_name := ""
 ## The model's instructions, the assistant's personality: the project's
 ## [code]instructions_file[/code], with [code]{assistant_name}[/code] filled in.
 var instructions := ""
+## The providers the project offers and the user's connection; null while
+## disabled.
+var connections: IVAssistantConnections
 
 var _dispatcher: IVAssistantDispatcher # null while disabled
 var _tool_set_entries: Dictionary[String, Array] = {}
+var _setup_wizard: IVAssistantSetupWizard
 
 
 func _ready() -> void:
@@ -66,6 +82,7 @@ func _ready() -> void:
 		for tool_set_name in config.get_section_keys("assistant_tool_sets"):
 			var entries: Array = config.get_value("assistant_tool_sets", tool_set_name)
 			_tool_set_entries[tool_set_name] = entries
+	connections = IVAssistantConnections.new(config)
 
 
 ## Whether the project enables the assistant.
@@ -92,6 +109,61 @@ func get_tool_set(tool_set_name: String) -> IVAssistantToolSet:
 			_dispatcher.automation, request)
 	_dispatcher.release()
 	return tool_set
+
+
+## Whether the user may choose their connection: the assistant is enabled and
+## the project presets none.
+func has_setup_wizard() -> bool:
+	return _dispatcher != null and !connections.preset_provider
+
+
+## Opens the setup wizard, where the user connects a model, if
+## [method has_setup_wizard].
+func open_setup_wizard() -> void:
+	if !has_setup_wizard():
+		return
+	if !_setup_wizard:
+		_setup_wizard = IVAssistantSetupWizard.new(connections, test_connection, assistant_name,
+				get_tool_set_names())
+		get_tree().root.add_child(_setup_wizard)
+	_setup_wizard.open()
+
+
+## Confirms [param connection] with one request: the model is given the
+## instructions and its tool set, and asked to call [constant TEST_TOOL].
+## Returns [code]{"ok": bool, "message": String}[/code], the message for the
+## user. Build tool sets only once the simulator has started.
+func test_connection(connection: IVAssistantConnection) -> Dictionary:
+	var tool_set := get_tool_set(connection.tool_set_name)
+	if !tool_set:
+		return {"ok": false, "message": "The app has no tool set '%s'" % connection.tool_set_name}
+	var definitions := tool_set.definitions.duplicate()
+	definitions.append(TEST_TOOL)
+	var messages: Array[Dictionary] = [connection.make_user_message(TEST_REQUEST)]
+	var reply := await connection.send(instructions, definitions, messages)
+	if !reply:
+		return {"ok": false, "message": connection.error}
+	var tool_calls: Array[Dictionary] = reply.tool_calls
+	for tool_call in tool_calls:
+		if tool_call.name != TEST_TOOL.name:
+			continue
+		var arguments: Dictionary = tool_call.arguments
+		var greeting := str(arguments.get("greeting", "")).strip_edges()
+		if !greeting:
+			return {"ok": true, "message": "Connected: the model called the test tool."}
+		return {"ok": true, "message": "Connected. %s says: \"%s\"" % [assistant_name, greeting]}
+	if tool_calls:
+		var tool_name: String = tool_calls[0].name
+		return {"ok": true, "message": ("Connected, but the model called %s, not the test tool."
+				+ " It may follow instructions poorly.") % tool_name}
+	var text: String = reply.text
+	match reply.stop:
+		"refusal":
+			return {"ok": false, "message": "The model declined the test."}
+		"length":
+			return {"ok": false, "message": "The model's reply was cut off before it called a tool."}
+	return {"ok": false, "message": ("The model answered without calling a tool, so it may not"
+			+ " take tools. It said: \"%s\"") % text.strip_edges().left(300)}
 
 
 ## Answers [param method] in process, as the TCP server answers a client's

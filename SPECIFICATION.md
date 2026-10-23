@@ -15,7 +15,7 @@ Goal 2 divides the work three ways:
 - **The plugin** provides the plumbing: connections to models and a setup wizard, the conversation loop that runs the model's tool calls through the declarations, and a chat box.
 - **The project** provides the assistant's personality, the tools it offers, which connections to offer, and the chat box's style and place. The Planetarium puts it in a panel at the bottom center.
 
-Goal 2 is under way (`CODING_PLAN.md` Phase 5): `IVAssistant` reaches the app in process in any build (§2.1), and a project gives it instructions and tool sets (§12). Connections to models, the conversation loop and the chat box are still to come.
+Goal 2 is under way (`CODING_PLAN.md` Phase 5): `IVAssistant` reaches the app in process in any build (§2.1), a project gives it instructions and tool sets (§12), and the user connects it to a model in a setup wizard (§12.4). The conversation loop and the chat box are still to come.
 
 The plugin knows Godot, not the project. A project's classes declare what a client may read and call (§11), and the Assistant discovers and dispatches those declarations; so a change in Core or in a project needs no change here.
 
@@ -25,7 +25,10 @@ The plugin knows Godot, not the project. A project's classes declare what a clie
 
 - **EditorPlugin** — Registers the `IVAssistantServer` and `IVAssistant` autoloads via `add_autoload_singleton()` when the plugin is enabled, and removes them when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
 - **IVAssistantServer** — The test client's transport (goal 1). An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Runs only in debug builds unless configured otherwise, and is inert in a web export, which has no `TCPServer`. It refers to no project class.
-- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener. It reaches only the user's surface: the members classes mark as the user's (§11.1), the widgets (§4.3) and the input actions (`list_actions`, `press_action`). A model is given the project's instructions and one of its tool sets (§12).
+- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener. It reaches only the user's surface: the members classes mark as the user's (§11.1), the widgets (§4.3) and the input actions (`list_actions`, `press_action`). A model is given the project's instructions and one of its tool sets (§12), through the user's connection (§12.4).
+- **IVAssistantConnections** — The model providers a project offers, and the user's connection to one, kept under `user://` with any key the user asks it to remember (§12.4).
+- **IVAssistantConnection** — A connection to one model, and the adapter for one provider API: `IVAssistantOpenAIConnection` (OpenAI-compatible chat completions, which local servers and most services speak) and `IVAssistantAnthropicConnection` (Anthropic's Messages API). It sends a conversation with tool definitions and lists models (§12.4).
+- **IVAssistantSetupWizard** — Where the user chooses a provider and model and gives a key; a connection is saved once one test tool call confirms it (§12.4).
 - **IVAssistantToolSet** — The tools one model is offered, built from a set the project names: their definitions, generated from the declarations, and their calls (§12.2).
 - **IVAssistantDispatcher** — Answers one request by its method: `describe`, `get`, `call` and the built-in tools. The server and `IVAssistant` each hold one, so a model's tool call takes the path a test client's request does.
 - **IVAssistantAutomation** — Discovers the objects that declare automation members and serves `describe`, `get` and `call` (§4.1, §4.2, §11).
@@ -52,6 +55,11 @@ IVAssistant (autoload Node; the user's assistant, inert unless enabled)
   ├─ get_tool_set(name) -> IVAssistantToolSet (§12.2)
   │    ├─ definitions: one per tool, generated from the declarations
   │    └─ call_tool(name, arguments) -> request()
+  ├─ connections: IVAssistantConnections (§12.4)
+  │    ├─ providers from the config; the user's connection and keys under user://
+  │    └─ make_connection() -> IVAssistantConnection: send(), list_models()
+  ├─ test_connection(connection): one test tool call
+  ├─ open_setup_wizard() -> IVAssistantSetupWizard
   └─ request(method, params): answers in process
        └─ IVAssistantDispatcher: everything
 
@@ -83,6 +91,8 @@ For projects with `wait_for_start = true` (splash screens), there is a gap betwe
 - Server starts only when `OS.is_debug_build()` is true, unless overridden in config
 - No authentication (localhost-only, debug-only)
 - A client calls only members a class declares (§11.1), never an arbitrary method
+- The user's assistant reaches only the user's surface (§11.1), and never the GUI where the user deals with the assistant itself: the setup wizard is in `IVAssistantWidgets.PRIVATE_GROUP`, which its widget listing skips. A secret `LineEdit` (a key) reports `secret` to every client, never its text (§11.7)
+- The user's key is stored unencrypted under `user://` if they ask it to be remembered, and sent only to the provider it is for (§12.4)
 
 ## 3. Communication Protocol
 
@@ -494,9 +504,22 @@ context_file=""
 enabled=false
 assistant_name=""
 instructions_file=""
+providers=["ollama", "lm_studio", "llama_server", "gemini", "groq", "openrouter", "anthropic", "openai", "poe"]
+preset_provider=""
+small_model_tool_set="full"
+large_model_tool_set="full"
 
 [assistant_tool_sets]
 full=["describe", "get", "call", "list_widgets", "operate_widget", "list_actions", "press_action"]
+
+[assistant_provider_anthropic]
+name="Anthropic (Claude)"
+adapter="anthropic"
+url="https://api.anthropic.com/v1"
+key_url="https://platform.claude.com/settings/keys"
+model="claude-opus-5-5"
+note="..."
+; ... one section per provider (§12.4)
 ```
 
 ### 7.1 Autoload Registration
@@ -529,6 +552,9 @@ The `[assistant]` section configures the user's assistant:
 - `enabled` — Whether the project offers the user's assistant, `IVAssistant` (default: false). When true it runs in every build, release and web included.
 - `assistant_name` — Display name for the assistant persona (default: empty, uses project name from ProjectSettings). `get_project_info` reports it too.
 - `instructions_file` — Path to a text file (`res://`) of the model's instructions, the assistant's personality (§12.1) (default: empty).
+- `providers` — The model providers the setup wizard offers, in order, each an `[assistant_provider_<id>]` section (§12.4).
+- `preset_provider` — A provider every user gets, which hides the setup wizard (default: empty).
+- `small_model_tool_set`, `large_model_tool_set` — The tool set a new connection gets, by its provider's `small_models` (§12.4) (default: `full`).
 
 The `[assistant_tool_sets]` section names the tool sets a model may be given (§12.2). The plugin's own, `full`, is the whole user's surface; a project adds sets, or removes one by setting it to `null`.
 
@@ -809,6 +835,8 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 
 **Composite widgets: their own value interface.** A widget whose state is not one control's declares `get_automation_value()` and `set_automation_value(value)`, plus `get_automation_options()` where the value is one of a set. `set_automation_value()` calls the Core method the widget's own handlers call, and returns `false` to refuse a value. The Assistant treats such a widget as one unit: the controls of its own scene (those it owns) are not widgets, though controls a project adds to it are. In Core: `IVSpeedButtons` (a speed index), `IVTrackCkbxs` (`"ecliptic"`, `"orbit"`, `"ground"`), `IVTimeSetter` (`[year, month, day, hour, minute, second]`) and `IVFocalLengthControl` (millimeters). A container without the interface (`IVHUDsBox`) is descended.
 
+**Privacy.** A `LineEdit` with `secret` set (a key, a password) reports `"secret": true` as its state, never its text, to any client; it can still be typed into. A node in `IVAssistantWidgets.PRIVATE_GROUP` (`"assistant_private"`), with everything under it, is not a widget to the user's assistant: GUI where the user deals with the assistant itself, such as the setup wizard.
+
 **Reach.** Popups are in-tree `Window`s, and a widget meant for automation exists in the tree, hidden if need be, so its absence from `list_widgets` means the project lacks it. A hidden widget is reached by operating its opener first, which `list_widgets` names as `opened_by`; no project configures scene roots.
 
 **Guards:**
@@ -827,7 +855,7 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 
 ## 12. The user's assistant
 
-`IVAssistant` (§2.1) gives a model two things the project writes: instructions, and a set of tools to call. Both are the project's; the plugin generates the tools' definitions from the declarations and runs their calls through `request()`, on the user's surface alone (§11.1). Connections to models and the conversation loop that sends these are still to come (`CODING_PLAN.md` Phase 5).
+`IVAssistant` (§2.1) gives a model two things the project writes: instructions, and a set of tools to call. Both are the project's; the plugin generates the tools' definitions from the declarations and runs their calls through `request()`, on the user's surface alone (§11.1). The model is the user's choice, made in the setup wizard (§12.4). The conversation loop that sends these is still to come (`CODING_PLAN.md` Phase 5).
 
 ### 12.1 Instructions
 
@@ -857,3 +885,37 @@ An entry is either:
 ### 12.3 What a project offers
 
 The user's members of Core's classes serve every project: selection, views, time, speed, HUDs, settings, widgets. Two of them are written to be read by an assistant and a screen reader alike, in the user's language: `IVSelectionData.get_body_data(body_name)`, a body's data as the GUI's data panel shows it, selected or not; and `IVViewManager.get_view_description()`, what the user sees now (the selection, the camera, the bodies in view, the date, time and speed). Core declares what its GUI does and shows; a tool that only an assistant needs is the project's, a class declaring user methods like any other (§7.2). The Planetarium's `BodyFinder.find_bodies` turns the words a user says ("Ganymede") into the body key the other tools take (`"MOON_GANYMEDE"`).
+
+### 12.4 Connections and the setup wizard
+
+The user connects the assistant to a model of their choosing: a server on their own computer, or a service with their own key. `IVAssistant.connections`, an `IVAssistantConnections`, holds the providers the project offers and the user's connection.
+
+**Providers.** Each is a config section, `[assistant_provider_<id>]`, and `[assistant] providers` lists those the setup wizard offers, in order. A project offers a subset, edits a section key by key in its override config, or adds its own section. The keys, all optional but `name` and `url`:
+
+| Key | Meaning |
+|---|---|
+| `name` | Display name. |
+| `adapter` | `"openai"` (OpenAI-compatible chat completions; the default), `"anthropic"` (Anthropic's Messages API), or the path of a project's `IVAssistantConnection` script. |
+| `url` | The API base, without a trailing slash. |
+| `local` | Whether the server runs on the user's computer (false). |
+| `small_models` | Whether a new connection gets `small_model_tool_set` (the same as `local`). |
+| `needs_key` | Whether the user gives a key (not `local`). |
+| `key_url`, `site` | Where the user gets a key; where they learn more or download the server. |
+| `model` | The model offered first. |
+| `note`, `web_note` | What the wizard says about it, and adds in a web build. |
+| `web` | Whether a web build offers it (true). |
+| `simple_schemas` | Whether its tool parameters must be simplified (false). |
+
+The plugin's providers, as of October 2026: three local servers on their default ports (Ollama, LM Studio, llama.cpp's `llama-server`), Google Gemini and Groq (free tiers), OpenRouter and Poe (one key for many companies' models; Poe spends a subscription's points), Anthropic and OpenAI. A project that runs or ships its own server names it in `preset_provider`: every user gets that connection, and the wizard is hidden (`has_setup_wizard()` is false). It needs no key, since a key shipped in an app is anyone's.
+
+**Connections.** `make_connection(provider, model, key, tool_set)` returns an `IVAssistantConnection`, unsaved; an empty argument takes the provider's model, a remembered key, or the tool set for the provider's model size. Its coroutines `send()` and `list_models()` make one request each, and fail with `error`, a message for the user. A conversation is an array of messages in the provider's own form, so what a model returns goes back to it unchanged (Anthropic's thinking blocks, Gemini's thought signatures): `make_user_message()` starts it, each reply's `message` is appended, and `make_tool_results()` returns calls' results. A reply gives `text`, `tool_calls` (`id`, `name`, `arguments`) and `stop` (`end`, `tool_calls`, `length`, `refusal`, `other`). The Anthropic adapter sends API version `2026-10-21`, caches the instructions, tools and conversation as a prefix, and on the models that take it asks for the API's server-side fallback on a refusal.
+
+With `simple_schemas`, `adapt_parameters()` simplifies the tool definitions for a provider that takes only part of JSON Schema (Gemini's OpenAI-compatible endpoint): an argument of any type, of a choice of forms (`anyOf`), or an object or array whose contents aren't described becomes text, which may be JSON, and `send()` turns that JSON back into a value before the call runs; `default` and `additionalProperties` are left out.
+
+**Saving.** `save_connection(connection, remember_key)` makes it the user's and writes `user://assistant/connection.cfg`: the provider, model and tool set, and the key only if the user asks it to be remembered, otherwise kept until the app quits. The key is stored unencrypted, on the user's device (in a web build, the browser's storage for the site), and sent only to its provider. `remove_connection()` removes the connection and every remembered key.
+
+**The test.** `IVAssistant.test_connection(connection)` sends the instructions and the connection's tool set with one more tool, `confirm_connection`, and asks the model to call it with a greeting. That confirms the key, the model, that the provider takes the tool definitions and that the model calls tools. It returns `{"ok": bool, "message": String}`: a greeting; or a model that called another tool (ok, but it may follow instructions poorly); or one that answered in text, or failed, with why.
+
+**The wizard.** `IVAssistant.open_setup_wizard()` opens an `IVAssistantSetupWizard`, a popup that stays open while the user works elsewhere, as when getting a key. The user picks a provider; the wizard asks the local servers for their models (in a web build only the one picked, since the browser may ask the user's permission to reach the computer's own servers), or lists a service's once a key is given; and "Test and connect" saves a connection only once the test confirms it. It says where the key is kept. A project places its entry point: the Planetarium adds a button to Core's options popup (`IVOptionsPopup.add_button()`).
+
+**The web.** `HTTPRequest` runs on the browser's `fetch`, so a service must allow calls from a page (CORS). As of October 2026 the plugin's services do, Anthropic with the `anthropic-dangerous-direct-browser-access` header, which the adapter sends in a web build. A page can reach a local server only with the browser's permission (Chrome's and Firefox's local network access prompts) and the server's: Ollama needs `OLLAMA_ORIGINS` set to the page's origin, LM Studio its Enable CORS setting.

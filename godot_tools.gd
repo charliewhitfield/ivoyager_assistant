@@ -406,7 +406,10 @@ func _build_inspect_tree(node: Node, depth: int) -> Dictionary:
 			tab_names.append(node.get_tab_title(i))
 		result["tab_names"] = tab_names
 	elif node is LineEdit:
-		result["text"] = node.text
+		if node.secret:
+			result["secret"] = true # a key or password is never reported
+		else:
+			result["text"] = node.text
 	elif node is TextEdit:
 		result["text"] = node.text
 	elif node is FoldableContainer:
