@@ -25,11 +25,12 @@ extends VBoxContainer
 ## A project places it in its GUI, usually in a panel of its own, and styles it
 ## with its theme; the colors below are those a theme has no entry for. It shows
 ## [code]IVAssistant.conversation[/code]: the user's words, the assistant's
-## replies and, with [member show_tool_calls], the tools it calls. Each reply is
-## an accessibility live region, so a screen reader reads it as it arrives.
-## With no connection, it offers the setup wizard if the project has one, and
-## with [member offer_dismiss] lets the user dismiss the offer. The text field takes focus when the chat box is shown, and lets it go on
-## [code]ui_cancel[/code]. The user's assistant can't see or operate it
+## replies and, as [code]IVAssistant.show_api_commands[/code] says, the tools it
+## calls. Each reply is an accessibility live region, so a screen reader reads
+## it as it arrives. With no connection, it offers the setup wizard if the
+## project has one, and with [member offer_dismiss] lets the user dismiss the
+## offer. The text field takes focus when the chat box is shown, and lets it go
+## on [code]ui_cancel[/code]. The user's assistant can't see or operate it
 ## ([constant IVAssistantWidgets.PRIVATE_GROUP]). Empty unless the assistant is
 ## enabled. See SPECIFICATION.md §12.5.
 
@@ -42,9 +43,6 @@ signal setup_dismissed()
 @export var width_in_font_sizes := 26.0
 ## The most lines of conversation shown before it scrolls.
 @export var transcript_lines := 10.0
-## Whether to show each tool the assistant calls, those already shown included.
-@export var show_tool_calls := true:
-	set = set_show_tool_calls
 ## Whether to speak each reply with the system's text-to-speech, which needs the
 ## project setting [code]audio/general/text_to_speech[/code].
 @export var speak_replies := false
@@ -66,6 +64,7 @@ signal setup_dismissed()
 var _assistant: Node # IVAssistant
 var _conversation: IVAssistantConversation
 
+var _is_showing_tool_calls := false
 var _tool_call_entries: Array[Label] = []
 var _scroll: ScrollContainer
 var _entries: VBoxContainer
@@ -95,6 +94,8 @@ func _ready() -> void:
 	_status.add_theme_color_override(&"font_color", note_color)
 	_setup_note.text = setup_note
 	_setup_button.theme_type_variation = setup_button_type_variation
+	_is_showing_tool_calls = _assistant.get(&"show_api_commands")
+	_assistant.connect(&"show_api_commands_changed", _on_show_api_commands_changed)
 	_conversation.turn_started.connect(_on_turn_started)
 	_conversation.reply_received.connect(_on_reply_received)
 	_conversation.tool_called.connect(_on_tool_called)
@@ -112,12 +113,6 @@ func _notification(what: int) -> void:
 				_scroll_to_end()
 				if _message_edit.is_visible_in_tree():
 					_message_edit.grab_focus.call_deferred()
-
-
-func set_show_tool_calls(value: bool) -> void:
-	show_tool_calls = value
-	for entry in _tool_call_entries:
-		entry.visible = value
 
 
 func _build() -> void:
@@ -294,8 +289,14 @@ func _on_reply_received(text: String) -> void:
 
 func _on_tool_called(tool_name: String, arguments: Dictionary) -> void:
 	var entry := _add_entry(_format_tool_call(tool_name, arguments), note_color)
-	entry.visible = show_tool_calls
+	entry.visible = _is_showing_tool_calls
 	_tool_call_entries.append(entry)
+
+
+func _on_show_api_commands_changed(is_shown: bool) -> void:
+	_is_showing_tool_calls = is_shown
+	for entry in _tool_call_entries:
+		entry.visible = is_shown
 
 
 func _on_turn_finished(error: String, unsent_text: String) -> void:

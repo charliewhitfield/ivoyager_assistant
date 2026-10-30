@@ -34,7 +34,13 @@ extends Node
 ## [code]ivoyager_assistant.cfg[/code] under [code][assistant][/code]. See
 ## SPECIFICATION.md §12.
 
+## Emitted when [member show_api_commands] changes.
+signal show_api_commands_changed(is_shown: bool)
+
 const ERR_NOT_ALLOWED := 5
+## The user's setting for [member show_api_commands], in an I, Voyager Core
+## project's IVSettingsManager.
+const API_COMMANDS_SETTING := &"show_api_commands"
 ## The tool a connection test asks the model to call, beside its tool set's.
 const TEST_TOOL := {
 	"name": "confirm_connection",
@@ -59,8 +65,14 @@ var instructions := ""
 var connections: IVAssistantConnections
 ## The user's conversation with the assistant; null while disabled.
 var conversation: IVAssistantConversation
+## Whether a chat box shows the tools the assistant calls: the project's
+## [code]show_api_commands[/code], or with [code]show_api_commands_setting[/code]
+## in an I, Voyager Core project, the user's setting [constant API_COMMANDS_SETTING],
+## which the project may show as an option. Read only.
+var show_api_commands := false
 
 var _dispatcher: IVAssistantDispatcher # null while disabled
+var _settings_manager: Node # IVSettingsManager, while it holds the user's setting
 var _tool_set_entries: Dictionary[String, Array] = {}
 var _feedback_url := ""
 var _setup_wizard: IVAssistantSetupWizard
@@ -90,6 +102,9 @@ func _ready() -> void:
 	connections = IVAssistantConnections.new(config)
 	conversation = IVAssistantConversation.new(connections, instructions, get_tool_set,
 			assistant_name)
+	show_api_commands = config.get_value("assistant", "show_api_commands", false)
+	if config.get_value("assistant", "show_api_commands_setting", true):
+		_add_api_commands_setting()
 
 
 ## Whether the project enables the assistant.
@@ -186,3 +201,28 @@ func request(method: String, params := {}) -> Variant:
 	var result: Variant = _dispatcher.dispatch(method, params)
 	_dispatcher.release()
 	return result
+
+
+# The plugin names no Core class, so it finds IVSettingsManager by its autoload
+# name. Every autoload is ready before Core reads the settings cache, so the
+# default is in time, and before a project's preinitializer asks has_setting().
+func _add_api_commands_setting() -> void:
+	_settings_manager = get_node_or_null(^"/root/IVSettingsManager")
+	if !_settings_manager:
+		return
+	_settings_manager.call(&"set_default", API_COMMANDS_SETTING, show_api_commands)
+	_settings_manager.connect(&"initialized", _read_api_commands_setting)
+	_settings_manager.connect(&"changed", _on_setting_changed)
+
+
+func _read_api_commands_setting() -> void:
+	var is_shown: bool = _settings_manager.call(&"get_setting", API_COMMANDS_SETTING)
+	if is_shown == show_api_commands:
+		return
+	show_api_commands = is_shown
+	show_api_commands_changed.emit(is_shown)
+
+
+func _on_setting_changed(setting: StringName, _value: Variant) -> void:
+	if setting == API_COMMANDS_SETTING:
+		_read_api_commands_setting()
