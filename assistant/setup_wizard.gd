@@ -31,13 +31,19 @@ extends PopupPanel
 ## assistant can't see or operate it
 ## ([constant IVAssistantWidgets.PRIVATE_GROUP]). See SPECIFICATION.md §12.4.
 
+const WARNING_COLOR := Color(1.0, 0.42, 0.42)
+
 ## The width of the text, in multiples of the theme's font size.
 var width_in_font_sizes := 34.0
+## The space between groups of related content, in multiples of the theme's
+## font size.
+var group_separation_in_font_sizes := 0.8
 
 var _connections: IVAssistantConnections
 var _test: Callable # IVAssistant.test_connection
 var _assistant_name: String
 var _tool_set_names: Array[String]
+var _feedback_url: String
 var _provider_ids: Array[String] = []
 var _local_models: Dictionary[String, Array] = {} # by provider, for the servers found
 var _listed_models: Array[String] = []
@@ -46,11 +52,10 @@ var _probing := false
 
 var _content: VBoxContainer
 var _row_labels: Array[Label] = []
-var _intro: Label
 var _providers: OptionButton
 var _note: Label
 var _link: LinkButton
-var _key_row: HBoxContainer
+var _key_group: VBoxContainer
 var _key_edit: LineEdit
 var _show_key: Button
 var _remember_key: CheckBox
@@ -64,13 +69,15 @@ var _connect_button: Button
 var _remove_button: Button
 
 
-## [param test] is [code]IVAssistant.test_connection[/code].
+## [param test] is [code]IVAssistant.test_connection[/code]. A
+## [param feedback_url] is linked from the experimental notice.
 func _init(connections: IVAssistantConnections, test: Callable, assistant_name: String,
-		tool_set_names: Array[String]) -> void:
+		tool_set_names: Array[String], feedback_url := "") -> void:
 	_connections = connections
 	_test = test
 	_assistant_name = assistant_name
 	_tool_set_names = tool_set_names
+	_feedback_url = feedback_url
 	add_to_group(IVAssistantWidgets.PRIVATE_GROUP)
 	process_mode = PROCESS_MODE_ALWAYS
 	popup_window = false
@@ -92,7 +99,10 @@ func open() -> void:
 		grab_focus()
 		return
 	var font_size := _content.get_theme_font_size(&"font_size", &"Label")
-	_content.custom_minimum_size.x = width_in_font_sizes * font_size
+	var width := width_in_font_sizes * font_size
+	_content.custom_minimum_size.x = width
+	_content.add_theme_constant_override(&"separation",
+			roundi(group_separation_in_font_sizes * font_size))
 	for label in _row_labels:
 		label.custom_minimum_size.x = 6.0 * font_size
 	_provider_ids = _connections.get_provider_ids()
@@ -106,6 +116,7 @@ func open() -> void:
 	_show_connection()
 	_fit()
 	popup_centered()
+	_fit_when_laid_out.call_deferred()
 	_find_local_servers()
 
 
@@ -117,56 +128,74 @@ func _build() -> void:
 	add_theme_stylebox_override(&"panel", panel_style)
 	_content = VBoxContainer.new()
 	add_child(_content)
+	var intro_group := _add_group()
 	var heading := Label.new()
-	_content.add_child(heading)
+	intro_group.add_child(heading)
 	heading.text = tr("Set up %s") % _assistant_name
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_intro = _add_text()
-	_intro.text = tr("%s is an AI guide. Ask it about what you see, or to take you somewhere,"
+	var intro := _add_text(intro_group)
+	intro.text = tr("%s is an AI guide. Ask it about what you see, or to take you somewhere,"
 			+ " and it operates the app for you. It runs on an AI model you choose: one on this"
 			+ " computer, free if your computer can run one, or an online service with your own"
 			+ " key, which charges for what you use or has a free tier.") % _assistant_name
+	var notice := RichTextLabel.new()
+	intro_group.add_child(notice)
+	notice.auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED
+	notice.bbcode_enabled = true
+	notice.fit_content = true
+	notice.scroll_active = false
+	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	notice.add_theme_color_override(&"default_color", WARNING_COLOR)
+	var notice_text := tr("EXPERIMENTAL. Connection has not been tested to most services.")
+	if _feedback_url:
+		notice_text += " " + tr("Please give us feedback [url=%s]here[/url].") % _feedback_url
+	notice.text = notice_text
+	notice.meta_clicked.connect(_on_notice_meta_clicked)
+	var provider_group := _add_group()
 	_providers = OptionButton.new()
-	_add_row(tr("Model from"), _providers)
+	_add_row(provider_group, tr("Model from"), _providers)
 	_providers.item_selected.connect(_on_provider_selected)
-	_note = _add_text()
+	_note = _add_text(provider_group)
 	_link = LinkButton.new()
-	_content.add_child(_link)
+	provider_group.add_child(_link)
 	_link.pressed.connect(_on_link_pressed)
+	_key_group = _add_group()
 	_key_edit = LineEdit.new()
 	_key_edit.secret = true
 	_key_edit.placeholder_text = tr("Paste your key")
-	_key_row = _add_row(tr("Key"), _key_edit)
+	var key_row := _add_row(_key_group, tr("Key"), _key_edit)
 	_key_edit.text_changed.connect(_on_key_changed)
 	_key_edit.text_submitted.connect(_list_models.unbind(1))
 	_key_edit.focus_exited.connect(_on_key_focus_exited)
 	_show_key = Button.new()
-	_key_row.add_child(_show_key)
+	key_row.add_child(_show_key)
 	_show_key.text = tr("Show")
 	_show_key.toggle_mode = true
 	_show_key.toggled.connect(_on_show_key_toggled)
 	_remember_key = CheckBox.new()
-	_content.add_child(_remember_key)
+	_key_group.add_child(_remember_key)
 	_remember_key.text = tr("Remember the key on this device")
 	_remember_key.button_pressed = true
-	_key_note = _add_text()
+	_key_note = _add_text(_key_group)
+	var model_group := _add_group()
 	_model_edit = LineEdit.new()
-	var model_row := _add_row(tr("Model"), _model_edit)
+	var model_row := _add_row(model_group, tr("Model"), _model_edit)
 	_models_button = MenuButton.new()
 	model_row.add_child(_models_button)
 	_models_button.text = tr("Choose")
 	_models_button.flat = false
 	_models_button.get_popup().index_pressed.connect(_on_model_chosen)
 	_tool_sets = OptionButton.new()
-	_tool_set_row = _add_row(tr("Tools"), _tool_sets)
+	_tool_set_row = _add_row(model_group, tr("Tools"), _tool_sets)
 	for tool_set_name in _tool_set_names:
 		_tool_sets.add_item(tool_set_name)
 	_tool_set_row.visible = _tool_set_names.size() > 1
 	_tool_set_row.tooltip_text = tr("The tools the model is given. A small model does best"
 			+ " with a short list; a large one can use more.")
-	_status = _add_text()
+	var status_group := _add_group()
+	_status = _add_text(status_group)
 	var buttons := HBoxContainer.new()
-	_content.add_child(buttons)
+	status_group.add_child(buttons)
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	buttons.add_theme_constant_override("separation", 24)
 	_connect_button = Button.new()
@@ -184,16 +213,22 @@ func _build() -> void:
 	close_button.pressed.connect(hide)
 
 
-func _add_text() -> Label:
+func _add_group() -> VBoxContainer:
+	var group := VBoxContainer.new()
+	_content.add_child(group)
+	return group
+
+
+func _add_text(group: VBoxContainer) -> Label:
 	var label := Label.new()
-	_content.add_child(label)
+	group.add_child(label)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	return label
 
 
-func _add_row(label_text: String, control: Control) -> HBoxContainer:
+func _add_row(group: VBoxContainer, label_text: String, control: Control) -> HBoxContainer:
 	var row := HBoxContainer.new()
-	_content.add_child(row)
+	group.add_child(row)
 	var label := Label.new()
 	row.add_child(label)
 	label.text = label_text
@@ -211,6 +246,13 @@ func _tr_value(provider: Dictionary, key: String) -> String:
 # A popup grows to fit its content but never shrinks back on its own.
 func _fit() -> void:
 	size = Vector2i.ZERO
+
+
+# Wrapped text measures its height at the width it last had, which is none
+# until the popup first lays it out, so a first fit is a word per line.
+func _fit_when_laid_out() -> void:
+	_fit()
+	move_to_center()
 
 
 func _get_provider_id() -> String:
@@ -255,9 +297,7 @@ func _show_provider(provider_id: String) -> void:
 		_link.text = tr("About %s") % provider_name
 		_link.uri = provider["site"]
 	_link.visible = _link.uri != ""
-	_key_row.visible = needs_key
-	_remember_key.visible = needs_key
-	_key_note.visible = needs_key
+	_key_group.visible = needs_key
 	var remembered_key := _connections.get_remembered_key(provider_id)
 	_key_edit.text = remembered_key
 	if is_saved and connection.api_key:
@@ -363,6 +403,10 @@ func _on_link_pressed() -> void:
 	OS.shell_open(_link.uri)
 
 
+func _on_notice_meta_clicked(meta: Variant) -> void:
+	OS.shell_open(str(meta))
+
+
 func _on_key_changed(_text: String) -> void:
 	_request_count += 1
 	_set_model_menu([])
@@ -388,7 +432,7 @@ func _on_connect_pressed() -> void:
 		_status.text = tr("Choose a model.")
 		return
 	var key := _key_edit.text.strip_edges()
-	if _key_row.visible and !key:
+	if _key_group.visible and !key:
 		_status.text = tr("Paste your key.")
 		return
 	var tool_set_name := ""

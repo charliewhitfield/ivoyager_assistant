@@ -64,6 +64,9 @@ var preset_provider := ""
 var small_model_tool_set := "full"
 ## The tool set a new connection gets to a provider of large models.
 var large_model_tool_set := "full"
+## Whether the user asked not to be offered setup again; saved, and cleared when
+## they save a connection. Set it with [method decline_setup].
+var is_setup_declined := false
 
 var _provider_ids: Array[String] = []
 var _providers: Dictionary[String, Dictionary] = {}
@@ -170,6 +173,7 @@ func save_connection(new_connection: IVAssistantConnection, remember_key := true
 	if preset_provider:
 		return
 	connection = new_connection
+	is_setup_declined = false
 	if remember_key and new_connection.api_key:
 		_keys[new_connection.provider_id] = new_connection.api_key
 	else:
@@ -186,6 +190,15 @@ func remove_connection() -> void:
 	_keys.clear()
 	_save()
 	connection_changed.emit()
+
+
+## Records that the user asked not to be offered setup again, until they save a
+## connection ([member is_setup_declined]).
+func decline_setup() -> void:
+	if preset_provider:
+		return
+	is_setup_declined = true
+	_save()
 
 
 ## Asks each local server the project offers for its models. Returns the
@@ -227,6 +240,7 @@ func _load() -> void:
 	if saved.has_section("keys"):
 		for provider_id in saved.get_section_keys("keys"):
 			_keys[provider_id] = saved.get_value("keys", provider_id)
+	is_setup_declined = saved.get_value("setup", "declined", false)
 	var provider_id: String = saved.get_value("connection", "provider", "")
 	if !_provider_ids.has(provider_id):
 		return
@@ -241,6 +255,8 @@ func _save() -> void:
 		saved.set_value("connection", "provider", connection.provider_id)
 		saved.set_value("connection", "model", connection.model)
 		saved.set_value("connection", "tool_set", connection.tool_set_name)
+	if is_setup_declined:
+		saved.set_value("setup", "declined", true)
 	for provider_id in _keys:
 		saved.set_value("keys", provider_id, _keys[provider_id])
 	DirAccess.make_dir_recursive_absolute(SAVE_PATH.get_base_dir())

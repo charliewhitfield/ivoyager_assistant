@@ -27,18 +27,24 @@ extends VBoxContainer
 ## [code]IVAssistant.conversation[/code]: the user's words, the assistant's
 ## replies and, with [member show_tool_calls], the tools it calls. Each reply is
 ## an accessibility live region, so a screen reader reads it as it arrives.
-## With no connection, it offers the setup wizard if the project has one. The
-## text field takes focus when the chat box is shown, and lets it go on
+## With no connection, it offers the setup wizard if the project has one, and
+## with [member offer_dismiss] lets the user dismiss the offer. The text field takes focus when the chat box is shown, and lets it go on
 ## [code]ui_cancel[/code]. The user's assistant can't see or operate it
 ## ([constant IVAssistantWidgets.PRIVATE_GROUP]). Empty unless the assistant is
 ## enabled. See SPECIFICATION.md §12.5.
+
+## Emitted when the user dismisses the setup offer ([member offer_dismiss]), for
+## the project to hide the chat box. If they asked not to see it again,
+## [member IVAssistantConnections.is_setup_declined] is already set.
+signal setup_dismissed()
 
 ## The chat's width, in multiples of the theme's font size.
 @export var width_in_font_sizes := 26.0
 ## The most lines of conversation shown before it scrolls.
 @export var transcript_lines := 10.0
-## Whether to show each tool the assistant calls.
-@export var show_tool_calls := true
+## Whether to show each tool the assistant calls, those already shown included.
+@export var show_tool_calls := true:
+	set = set_show_tool_calls
 ## Whether to speak each reply with the system's text-to-speech, which needs the
 ## project setting [code]audio/general/text_to_speech[/code].
 @export var speak_replies := false
@@ -48,14 +54,26 @@ extends VBoxContainer
 @export var note_color := Color(0.62, 0.62, 0.62)
 ## The color of errors.
 @export var error_color := Color(1.0, 0.56, 0.46)
+## Whether the setup offer has Dismiss and "Don't show again", for a project
+## that hides the chat box on [signal setup_dismissed].
+@export var offer_dismiss := false
+## Text shown with the setup offer, such as where else the project offers
+## setup; a translation key or text.
+@export var setup_note := ""
+## The setup button's theme type variation, to make it stand out.
+@export var setup_button_type_variation := &""
 
 var _assistant: Node # IVAssistant
 var _conversation: IVAssistantConversation
 
+var _tool_call_entries: Array[Label] = []
 var _scroll: ScrollContainer
 var _entries: VBoxContainer
 var _status: Label
+var _setup_note: Label
 var _setup_button: Button
+var _dismiss_row: HBoxContainer
+var _dont_show_again: CheckBox
 var _input_row: HBoxContainer
 var _message_edit: LineEdit
 var _send_button: Button
@@ -75,6 +93,8 @@ func _ready() -> void:
 		hide()
 		return
 	_status.add_theme_color_override(&"font_color", note_color)
+	_setup_note.text = setup_note
+	_setup_button.theme_type_variation = setup_button_type_variation
 	_conversation.turn_started.connect(_on_turn_started)
 	_conversation.reply_received.connect(_on_reply_received)
 	_conversation.tool_called.connect(_on_tool_called)
@@ -94,6 +114,12 @@ func _notification(what: int) -> void:
 					_message_edit.grab_focus.call_deferred()
 
 
+func set_show_tool_calls(value: bool) -> void:
+	show_tool_calls = value
+	for entry in _tool_call_entries:
+		entry.visible = value
+
+
 func _build() -> void:
 	_scroll = ScrollContainer.new()
 	add_child(_scroll)
@@ -107,10 +133,23 @@ func _build() -> void:
 	add_child(_status)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.accessibility_live = AccessibilityServer.LIVE_POLITE
+	_setup_note = Label.new()
+	add_child(_setup_note)
+	_setup_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_setup_button = Button.new()
 	add_child(_setup_button)
 	_setup_button.size_flags_horizontal = SIZE_SHRINK_CENTER
 	_setup_button.pressed.connect(_on_setup_pressed)
+	_dismiss_row = HBoxContainer.new()
+	add_child(_dismiss_row)
+	_dismiss_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var dismiss_button := Button.new()
+	_dismiss_row.add_child(dismiss_button)
+	dismiss_button.text = tr("Dismiss")
+	dismiss_button.pressed.connect(_on_dismiss_pressed)
+	_dont_show_again = CheckBox.new()
+	_dismiss_row.add_child(_dont_show_again)
+	_dont_show_again.text = tr("Don't show again")
 	_input_row = HBoxContainer.new()
 	add_child(_input_row)
 	_message_edit = LineEdit.new()
@@ -133,6 +172,11 @@ func _resize() -> void:
 	var font_size := get_theme_font_size(&"font_size", &"Label")
 	var font := get_theme_font(&"font", &"Label")
 	custom_minimum_size.x = width_in_font_sizes * font_size
+	# Wrapped text measures its height at the width it last had, which is none
+	# until it is first laid out; meanwhile the chat box would seem too tall to
+	# fit beside a project's other panels.
+	_status.custom_maximum_size.x = custom_minimum_size.x
+	_setup_note.custom_maximum_size.x = custom_minimum_size.x
 	var transcript_height := transcript_lines * font.get_height(font_size)
 	_scroll.custom_maximum_size = Vector2(-1.0, transcript_height)
 
@@ -142,7 +186,10 @@ func _show_connection() -> void:
 	var connection := _conversation.connections.connection
 	_input_row.visible = connection != null
 	var has_setup_wizard: bool = _assistant.call(&"has_setup_wizard")
-	_setup_button.visible = !connection and has_setup_wizard
+	var is_offering_setup := !connection and has_setup_wizard
+	_setup_note.visible = is_offering_setup and setup_note != ""
+	_setup_button.visible = is_offering_setup
+	_dismiss_row.visible = is_offering_setup and offer_dismiss
 	_setup_button.text = tr("Set up %s...") % assistant_name
 	_message_edit.placeholder_text = tr("Ask %s") % assistant_name
 	_message_edit.accessibility_name = _message_edit.placeholder_text
@@ -161,7 +208,7 @@ func _show_running(is_running: bool) -> void:
 	_send_button.text = tr("Stop") if is_running else tr("Send")
 
 
-func _add_entry(text: String, color := Color.TRANSPARENT, is_live := false) -> void:
+func _add_entry(text: String, color := Color.TRANSPARENT, is_live := false) -> Label:
 	var entry := Label.new()
 	_entries.add_child(entry)
 	entry.auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED
@@ -169,12 +216,20 @@ func _add_entry(text: String, color := Color.TRANSPARENT, is_live := false) -> v
 	if color.a > 0.0:
 		entry.add_theme_color_override(&"font_color", color)
 	if is_live:
-		# A screen reader announces a live region when its text changes, not
-		# necessarily when it appears.
 		entry.accessibility_live = AccessibilityServer.LIVE_POLITE
-		await get_tree().process_frame
-		if !is_instance_valid(entry):
-			return
+		_set_live_text(entry, text)
+		return entry
+	entry.text = text
+	_scroll_to_end()
+	return entry
+
+
+# A screen reader announces a live region when its text changes, not
+# necessarily when it appears.
+func _set_live_text(entry: Label, text: String) -> void:
+	await get_tree().process_frame
+	if !is_instance_valid(entry):
+		return
 	entry.text = text
 	_scroll_to_end()
 
@@ -238,8 +293,9 @@ func _on_reply_received(text: String) -> void:
 
 
 func _on_tool_called(tool_name: String, arguments: Dictionary) -> void:
-	if show_tool_calls:
-		_add_entry(_format_tool_call(tool_name, arguments), note_color)
+	var entry := _add_entry(_format_tool_call(tool_name, arguments), note_color)
+	entry.visible = show_tool_calls
+	_tool_call_entries.append(entry)
 
 
 func _on_turn_finished(error: String, unsent_text: String) -> void:
@@ -254,6 +310,7 @@ func _on_turn_finished(error: String, unsent_text: String) -> void:
 func _on_cleared() -> void:
 	for entry in _entries.get_children():
 		entry.queue_free()
+	_tool_call_entries.clear()
 	if speak_replies and DisplayServer.tts_is_speaking():
 		DisplayServer.tts_stop()
 	_show_connection()
@@ -282,3 +339,9 @@ func _on_new_pressed() -> void:
 
 func _on_setup_pressed() -> void:
 	_assistant.call(&"open_setup_wizard")
+
+
+func _on_dismiss_pressed() -> void:
+	if _dont_show_again.button_pressed:
+		_conversation.connections.decline_setup()
+	setup_dismissed.emit()

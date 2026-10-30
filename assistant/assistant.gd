@@ -62,6 +62,7 @@ var conversation: IVAssistantConversation
 
 var _dispatcher: IVAssistantDispatcher # null while disabled
 var _tool_set_entries: Dictionary[String, Array] = {}
+var _feedback_url := ""
 var _setup_wizard: IVAssistantSetupWizard
 
 
@@ -81,6 +82,7 @@ func _ready() -> void:
 		if !text:
 			push_error("IVAssistant: can't read instructions_file '%s'" % instructions_file)
 		instructions = text.format({"assistant_name": assistant_name})
+	_feedback_url = config.get_value("assistant", "feedback_url", "")
 	if config.has_section("assistant_tool_sets"):
 		for tool_set_name in config.get_section_keys("assistant_tool_sets"):
 			var entries: Array = config.get_value("assistant_tool_sets", tool_set_name)
@@ -129,7 +131,7 @@ func open_setup_wizard() -> void:
 		return
 	if !_setup_wizard:
 		_setup_wizard = IVAssistantSetupWizard.new(connections, test_connection, assistant_name,
-				get_tool_set_names())
+				get_tool_set_names(), _feedback_url)
 		get_tree().root.add_child(_setup_wizard)
 	_setup_wizard.open()
 
