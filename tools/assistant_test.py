@@ -574,8 +574,10 @@ class TestRunner:
         if self.has_member("SelectionManager", "select_by_name"):
             found = self.client.invoke("SelectionManager", "select_by_name", name="PLANET_MARS")
             self.assert_true(found, "SelectionManager.select_by_name: PLANET_MARS")
-            self.assert_eq(self.client.invoke("SelectionManager", "get_name"), "PLANET_MARS",
-                           "SelectionManager.get_name")
+            # A project may select a body as something that stands for it, as Astropolis selects a
+            # facility or a locus there; whatever it selects reports the body.
+            self.assert_eq(self.client.invoke("SelectionManager", "get_body_name"), "PLANET_MARS",
+                           "SelectionManager.get_body_name")
         else:
             self.skip("SelectionManager.select_by_name not declared")
 

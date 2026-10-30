@@ -649,7 +649,7 @@ Execute these steps in order:
 1. **Discover:** Call `get_project_info` (protocol version 4 or later) and `describe`.
 2. **Start the simulation:** If `IVCoreSettings.wait_for_start` is `true` and `IVStateManager.started` is `false`, call `IVStateManager.start`. Then poll `get_project_info` until `ready`, and `describe` again: bodies and their widgets exist now.
 3. **Verify state:** `get` `IVStateManager.started`, `IVGlobal.date`, `SelectionManager.selection`, `IVCamera.target`, and confirm reasonable values.
-4. **Exercise controls:** Find planets among `describe`'s `IVBody` instances by their flags; `SelectionManager.select_by_name` `"PLANET_MARS"`; `CameraHandler.move_to_by_name` `"PLANET_EARTH"`; pause and unpause through `IVStateManager.set_user_paused` (one batch); `SpeedManager.change_speed`.
+4. **Exercise controls:** Find planets among `describe`'s `IVBody` instances by their flags; `SelectionManager.select_by_name` `"PLANET_MARS"`, checking the selection's body (`get_body_name`), since a project may select a body as something that stands for it; `CameraHandler.move_to_by_name` `"PLANET_EARTH"`; pause and unpause through `IVStateManager.set_user_paused` (one batch); `SpeedManager.change_speed`.
    - **Widgets:** operate `IVPauseButton` and `IVSpeedButtons` and confirm the state they change.
    - **Mouse hover** (if the game renders): identify a body, an orbit line and an asteroid point under the mouse, as in §4.5.
 5. **Save/load cycle** (if the project declares the Save plugin's `IVSave`): `call` `IVSave.quicksave`, then poll `get` `IVSave.is_saving` until it is `false`. `call` `IVSave.quickload`, then poll until `IVSave.is_loading` is `false` and `IVStateManager.started` is `true`.
