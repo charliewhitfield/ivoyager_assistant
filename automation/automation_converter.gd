@@ -572,6 +572,63 @@ func describe_json_form(type: int) -> String:
 	return "a %s" % type_string(type)
 
 
+## A JSON Schema for a value of the type [param info] describes, in the JSON
+## forms of SPECIFICATION.md §11.4, for a model's tool definition. An int
+## argument named for one of [param class_enums] ([code]body_flags[/code] for
+## [code]BodyFlags[/code]) takes an array of its names, OR'd as flags.
+func get_json_schema(info: Dictionary, class_enums: Dictionary[StringName, Dictionary] = {}
+		) -> Dictionary:
+	var type: int = info.get("type", TYPE_NIL)
+	var usage: int = info.get("usage", 0)
+	var class_name_: StringName = info.get("class_name", &"")
+	var hint: int = info.get("hint", PROPERTY_HINT_NONE)
+	var hint_string: String = info.get("hint_string", "")
+	if type == TYPE_INT and usage & PROPERTY_USAGE_CLASS_IS_ENUM:
+		return {"type": "string", "enum": get_enum(class_name_).keys()}
+	if type == TYPE_INT and class_enums:
+		var arg_name: String = info.get("name", "")
+		var enum_suffix := "." + arg_name.to_pascal_case()
+		for enum_name in class_enums:
+			if String(enum_name).ends_with(enum_suffix):
+				return {"type": "array", "items": {"type": "string",
+						"enum": class_enums[enum_name].keys()}}
+	match type:
+		TYPE_NIL:
+			return {}
+		TYPE_BOOL:
+			return {"type": "boolean"}
+		TYPE_INT:
+			return {"type": "integer"}
+		TYPE_FLOAT:
+			return {"type": "number"}
+		TYPE_STRING, TYPE_STRING_NAME, TYPE_NODE_PATH:
+			return {"type": "string"}
+		TYPE_COLOR:
+			return {"type": "string", "description": "An HTML color, \"#rrggbb\""}
+		TYPE_OBJECT:
+			var script := _get_automation().get_global_script(class_name_)
+			var key: Array[StringName] = []
+			if script:
+				key = _get_automation().get_declaration(script).key
+			if key.size() == 1:
+				return {"type": "string", "description": "The %s of a %s" % [key[0], class_name_]}
+			return {"type": "object", "description": "The address of a %s" % class_name_}
+		TYPE_ARRAY:
+			if hint == PROPERTY_HINT_ARRAY_TYPE and hint_string:
+				return {"type": "array", "items": get_json_schema(_info_from_hint_string(hint_string))}
+			return {"type": "array"}
+		TYPE_DICTIONARY:
+			return {"type": "object"}
+		TYPE_VECTOR2, TYPE_VECTOR2I, TYPE_VECTOR3, TYPE_VECTOR3I, TYPE_VECTOR4, TYPE_VECTOR4I, \
+				TYPE_QUATERNION, TYPE_PLANE, TYPE_RECT2, TYPE_RECT2I, TYPE_AABB, \
+				TYPE_PACKED_INT32_ARRAY, TYPE_PACKED_INT64_ARRAY, TYPE_PACKED_FLOAT32_ARRAY, \
+				TYPE_PACKED_FLOAT64_ARRAY:
+			return {"type": "array", "items": {"type": "number"}}
+		TYPE_PACKED_STRING_ARRAY:
+			return {"type": "array", "items": {"type": "string"}}
+	return {"type": "string", "description": "As Godot prints a %s" % type_string(type)}
+
+
 func _get_automation() -> IVAssistantAutomation:
 	return _automation_ref.get_ref()
 

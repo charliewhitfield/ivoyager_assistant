@@ -30,11 +30,18 @@ extends RefCounted
 
 ## The methods these tools handle, by their protocol names.
 const METHODS: Array[String] = ["list_widgets", "operate_widget"]
+## Those a user's assistant may use: all of them.
+const USER_METHODS: Array[String] = ["list_widgets", "operate_widget"]
 
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2
 const ERR_NOT_FOUND := 3
 const ERR_NOT_ALLOWED := 5
+
+## A node in this group, with everything under it, is kept from the user's
+## assistant: GUI where the user deals with the assistant itself, such as the
+## setup wizard and its key, and the chat box.
+const PRIVATE_GROUP := &"assistant_private"
 
 const VALUE_GETTER := &"get_automation_value"
 const VALUE_SETTER := &"set_automation_value"
@@ -352,6 +359,8 @@ func _get_state(widget: Control) -> Dictionary:
 			return {"folded": foldable.folded, "title": foldable.title}
 		FAMILY_LINE_EDIT:
 			var line_edit: LineEdit = widget
+			if line_edit.secret:
+				return {"secret": true} # a key or password is never reported
 			return {"text": line_edit.text}
 		FAMILY_TEXT_EDIT:
 			var text_edit: TextEdit = widget
@@ -467,6 +476,8 @@ func _collect_widgets(root: Node) -> Array[Control]:
 
 func _collect_widgets_recursive(node: Node, widgets: Array[Control], composite: Control = null
 		) -> void:
+	if _automation.user_only and node.is_in_group(PRIVATE_GROUP):
+		return
 	if node is Control and (!composite or node.owner != composite):
 		var control: Control = node
 		var family := _get_family(control)

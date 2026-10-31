@@ -40,6 +40,10 @@ var _export_plugin: IVAssistantExportPlugin
 
 
 func _enter_tree() -> void:
+	# A command-line export runs as the editor's first file scan ends, before the
+	# waits below are over.
+	_export_plugin = IVAssistantExportPlugin.new()
+	add_export_plugin(_export_plugin)
 
 	# Wait for required plugins...
 	await get_tree().process_frame
@@ -56,9 +60,12 @@ func _enter_tree() -> void:
 			"ivoyager_assistant", " - https://ivoyager.dev")
 	_config = IVAssistantPluginUtils.get_ivoyager_config(
 			"res://addons/ivoyager_assistant/ivoyager_assistant.cfg")
+	# The editor's first file scan empties the UID database until it ends, and an
+	# autoload added meanwhile fails to load every autoload from its UID.
+	var filesystem := EditorInterface.get_resource_filesystem()
+	while filesystem.is_scanning():
+		await get_tree().process_frame
 	_add_autoloads()
-	_export_plugin = IVAssistantExportPlugin.new()
-	add_export_plugin(_export_plugin)
 
 
 func _exit_tree() -> void:

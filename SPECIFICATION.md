@@ -2,10 +2,20 @@
 
 ## 1. Purpose
 
-The Assistant plugin provides a programmatic interface to the I, Voyager simulation with two goals:
+The Assistant plugin provides a programmatic interface to an I, Voyager project, or any Godot project (§8), with two goals:
 
 1. **AI-assisted testing** — Enable AI tools (Claude Code) to query simulation state and exercise controls, verifying correctness of orbital mechanics, scene tree construction, time management, and GUI behavior.
-2. **Accessibility** — Provide a command-based interface that can be driven by voice control, screen readers, or other assistive technologies for solar system navigation.
+2. **AI assistant** — A user talks, by text or voice, with an AI of their choosing, which operates the app on their behalf. It works in any build, the web included: inside the app, through a model the user connects or the project ships beside it, or from the user's own AI application alongside. It is how voice and natural language reach the app, so it serves accessibility first; screen readers, announcements and spatial audio need no AI and belong to the GUI itself (in I, Voyager, Core's widgets), not here.
+
+Both goals use one interface, what a project's classes declare (§11). They differ in the client: a developer's tool outside a debug build, or the user's assistant inside a shipped one.
+
+Goal 2 divides the work three ways:
+
+- **The model** is never part of the plugin. It is a remote service, a local server the user runs, or a server the project ships beside the app.
+- **The plugin** provides the plumbing: connections to models and a setup wizard, the conversation loop that runs the model's tool calls through the declarations, and a chat box.
+- **The project** provides the assistant's personality, the tools it offers, which connections to offer, and the chat box's style and place. The Planetarium puts it in a panel at the bottom center.
+
+Goal 2 is under way (`CODING_PLAN.md` Phase 5): `IVAssistant` reaches the app in process in any build (§2.1), a project gives it instructions and tool sets (§12), and the user connects it to a model in a setup wizard (§12.4) and talks with it in a chat box (§12.5). MCP, speech and a model shipped with an app are still to come.
 
 The plugin knows Godot, not the project. A project's classes declare what a client may read and call (§11), and the Assistant discovers and dispatches those declarations; so a change in Core or in a project needs no change here.
 
@@ -13,8 +23,16 @@ The plugin knows Godot, not the project. A project's classes declare what a clie
 
 ### 2.1 Integration with a project
 
-- **EditorPlugin** — Registers `IVAssistantServer` as an autoload via `add_autoload_singleton()` when the plugin is enabled, and removes it when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
-- **IVAssistantServer** — An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Inert in a web export, which has no `TCPServer`. It refers to no project class.
+- **EditorPlugin** — Registers the `IVAssistantServer` and `IVAssistant` autoloads via `add_autoload_singleton()` when the plugin is enabled, and removes them when disabled. It also registers `IVAssistantExportPlugin`, which adds declared members' doc comments to an export (§11.5).
+- **IVAssistantServer** — The test client's transport (goal 1). An autoload Node (root-level singleton). Reads config in `_ready()`, finds the project's lifecycle declaration (§11.6), and on its "initialized" signal starts a TCP server. Processes commands in `_process()` on the main thread. Runs only in debug builds unless configured otherwise, and is inert in a web export, which has no `TCPServer`. It refers to no project class.
+- **IVAssistant** — The user's assistant (goal 2). An autoload Node, inert unless the project enables it (§7.3). Its `request(method, params)` answers a request in process, as the server answers a client's, so it runs in any build, release and web included, with no network listener. It reaches only the user's surface: the members classes mark as the user's (§11.1), the widgets (§4.3) and the input actions (`list_actions`, `press_action`). A model is given the project's instructions and one of its tool sets (§12), through the user's connection (§12.4), and the user talks with it in `conversation` (§12.5).
+- **IVAssistantConversation** — The user's conversation with the assistant, and the loop that carries it: the user's words go to the model, the tools it calls run, and their results go back, until it answers (§12.5).
+- **IVAssistantChatBox** — A widget where the user talks with the assistant, which a project places and themes (§12.5).
+- **IVAssistantConnections** — The model providers a project offers, and the user's connection to one, kept under `user://` with any key the user asks it to remember (§12.4).
+- **IVAssistantConnection** — A connection to one model, and the adapter for one provider API: `IVAssistantOpenAIConnection` (OpenAI-compatible chat completions, which local servers and most services speak) and `IVAssistantAnthropicConnection` (Anthropic's Messages API). It sends a conversation with tool definitions and lists models (§12.4).
+- **IVAssistantSetupWizard** — Where the user chooses a provider and model and gives a key; a connection is saved once one test tool call confirms it (§12.4).
+- **IVAssistantToolSet** — The tools one model is offered, built from a set the project names: their definitions, generated from the declarations, and their calls (§12.2).
+- **IVAssistantDispatcher** — Answers one request by its method: `describe`, `get`, `call` and the built-in tools. The server and `IVAssistant` each hold one, so a model's tool call takes the path a test client's request does.
 - **IVAssistantAutomation** — Discovers the objects that declare automation members and serves `describe`, `get` and `call` (§4.1, §4.2, §11).
 - **Built-in tools** — `IVAssistantWidgets` (list and operate widgets, §4.3) and `IVAssistantGodotTools` (screenshots, mouse, input actions, GUI inspection, §4.4–4.6). Both need only Godot.
 
@@ -25,18 +43,39 @@ EditorPlugin (editor/editor_plugin.gd)
   ├─ _enter_tree(): reads ivoyager_assistant.cfg, calls add_autoload_singleton()
   └─ IVAssistantExportPlugin: adds the doc-comment digest to exports (§11.5)
 
-IVAssistantServer (autoload Node, root-level singleton)
+IVAssistantServer (autoload Node, root-level singleton; the test client's)
   ├─ _ready(): reads config and command-line args, checks enabled/debug_only
   ├─ finds AUTOMATION_LIFECYCLE on an autoload and connects its signals (§11.6)
   ├─ on lifecycle "initialized": starts TCPServer on 127.0.0.1:<port> (§7.3)
   ├─ on lifecycle "started": begins evaluating the readiness gate (§7.4)
   └─ _process(): polls TCP, reads JSON requests (or batches), dispatches, writes responses
-       ├─ server: get_project_info, describe, get, call, quit
-       ├─ IVAssistantAutomation: discovery, addresses, conversion, availability (§11)
-       └─ built-in: IVAssistantWidgets (§4.3), IVAssistantGodotTools (§4.4–4.6)
+       ├─ server: get_project_info, quit
+       └─ IVAssistantDispatcher: everything else
+
+IVAssistant (autoload Node; the user's assistant, inert unless enabled)
+  ├─ instructions: the project's text for the model (§12.1)
+  ├─ get_tool_set(name) -> IVAssistantToolSet (§12.2)
+  │    ├─ definitions: one per tool, generated from the declarations
+  │    └─ call_tool(name, arguments) -> request()
+  ├─ connections: IVAssistantConnections (§12.4)
+  │    ├─ providers from the config; the user's connection and keys under user://
+  │    └─ make_connection() -> IVAssistantConnection: send(), list_models()
+  ├─ conversation: IVAssistantConversation (§12.5)
+  │    └─ send(text): the model's tool calls run through the tool set until it answers
+  ├─ test_connection(connection): one test tool call
+  ├─ open_setup_wizard() -> IVAssistantSetupWizard
+  └─ request(method, params): answers in process
+       └─ IVAssistantDispatcher: everything
+
+IVAssistantDispatcher (one per client)
+  ├─ describe, get, call
+  ├─ IVAssistantAutomation: discovery, addresses, conversion, availability (§11)
+  └─ built-in: IVAssistantWidgets (§4.3), IVAssistantGodotTools (§4.4–4.6)
 ```
 
 ### 2.3 Lifecycle
+
+This is the server's lifecycle. `IVAssistant` has none: once enabled, it answers on whatever exists, and a declared member's class says what is available now (§11.1).
 
 1. EditorPlugin registers `IVAssistantServer` as an autoload when the plugin is enabled.
 2. On game start, `IVAssistantServer._ready()` reads config and command-line overrides (§7.3) and checks `enabled`/`debug_only`. Once every autoload is in the tree, it finds the first autoload whose script declares `AUTOMATION_LIFECYCLE` (§11.6; in Core, `IVStateManager`) and connects to the signals it names.
@@ -56,13 +95,15 @@ For projects with `wait_for_start = true` (splash screens), there is a gap betwe
 - Server starts only when `OS.is_debug_build()` is true, unless overridden in config
 - No authentication (localhost-only, debug-only)
 - A client calls only members a class declares (§11.1), never an arbitrary method
+- The user's assistant reaches only the user's surface (§11.1), and never the GUI where the user deals with the assistant itself: the setup wizard and the chat box are in `IVAssistantWidgets.PRIVATE_GROUP`, which its widget listing skips. A secret `LineEdit` (a key) reports `secret` to every client, never its text (§11.7)
+- The user's key is stored unencrypted under `user://` if they ask it to be remembered, and sent only to the provider it is for (§12.4)
 
 ## 3. Communication Protocol
 
 ### 3.1 Transport
 
 - **TCP** on `localhost`, default port `29071`
-- Port configurable via `ivoyager_assistant.cfg` under `[assistant]` section, or per process on the command line (§7.3), so several instances can run on one machine
+- Port configurable via `ivoyager_assistant.cfg` under `[assistant_server]` section, or per process on the command line (§7.3), so several instances can run on one machine
 
 ### 3.2 Message Format
 
@@ -131,7 +172,7 @@ Returns project identity, the server's lifecycle state, its methods and optional
 
 - `started` — the lifecycle "started" signal has fired (§2.3); `ready` — the readiness gate is open (§7.4).
 - `capabilities` — every method the server answers: its own and the built-in tools'. What a project's classes offer is in `describe`, not here.
-- `assistant_name` defaults to `project_name` unless overridden in config. `context` (string, optional) is included if a context file is configured.
+- `assistant_name` defaults to `project_name` unless overridden in config. `context` (string, optional) is the server's `context_file` (§7.3), if one is configured.
 - `process_id` (int) is the game's OS process id — on Windows the game's own process, not the `_console.exe` wrapper a launcher starts — and `port` the port it listens on.
 - `instance_id` (string, optional) echoes the `--assistant-instance` command-line argument (§7.3). A launcher that passes one can confirm it reached the process it started rather than another instance holding the port.
 
@@ -177,13 +218,14 @@ Errors: an unknown address is code 3 (an ambiguous one code 2, listing the candi
 
 ### 4.2 `describe`
 
-A client's whole context in one call: every declared object and class, with each member's signature and description, the enum values members use, which members are unavailable now, and the user surface — the widgets a user can see and the input actions. All of it is generated from the running app, so anything absent is something the project does not offer, or does not offer now.
+A client's whole context in one call: every declared object and class, with each member's signature and description, which members are the user's, the enum values members use, which members are unavailable now, and the widgets a user can see and the input actions. All of it is generated from the running app, so anything absent is something the project does not offer, or does not offer now.
 
 **Params:**
 - `full` (bool, optional, default `false`) — Full class descriptions, rather than each class's first paragraph.
 - `instances` (bool, optional, default `true`) — List each instance of a keyed class.
 - `widgets` (bool, optional, default `true`) — Include the visible widgets (as `list_widgets` with `visible_only`).
 - `actions` (bool, optional, default `true`) — Include the input actions (as `list_actions`).
+- `user` (bool, optional, default `false`) — Only the user's surface: the members marked as the user's (§11.1), on the objects and classes that have any. It is what the user's assistant is given, which can't ask for more.
 
 **Result (abbreviated):**
 ```json
@@ -192,12 +234,12 @@ A client's whole context in one call: every declared object and class, with each
     "Timekeeper": {
       "class": "IVTimekeeper",
       "description": "Maintains simulator \"time\" (TT; J2000 epoch), Julian Day Number, ...",
-      "surface": "test",
       "methods": {
         "set_time": {"description": "Sets `time` and emits `time_set`. ...",
             "args": [{"name": "new_time", "type": "float"}], "returns": "void"}
       },
-      "properties": {"time": {"type": "float", "description": "Terrestrial Time (TT) ..."}}
+      "properties": {"time": {"type": "float", "description": "Terrestrial Time (TT) ...",
+          "user": true}}
     },
     "IVStateManager": {"class": "IVStateManager", "...": "...", "unavailable": ["start", "exit"]}
   },
@@ -215,7 +257,7 @@ A client's whole context in one call: every declared object and class, with each
 - `objects` — single objects by address: an autoload's name, a role a declaring object names (§11.2), or a class with one instance. `classes` — classes with several instances (keyed, §11.3), and classes that declared members hold or return (`reached_by`), which a client reads as values or addresses with `via`.
 - A method's `args` list each argument's `name`, `type`, `optional`, and `default` where the default is known. Types read as Godot names them: `"float"`, `"Vector3"`, `"Array[StringName]"`, `"IVBody"`, an enum's `"Class.Enum"`, `"Variant"`, `"void"`.
 - `description` is the member's or class's doc comment (§11.5). A Godot-native member a class declares (`name`, `global_position`, `visible`) has none.
-- `surface` is `"user"` for a `Control` — what a user operates or sees — and `"test"` otherwise. The user surface is all an accessibility client should use; the test surface reaches state however the GUI looks.
+- `user` is `true` on a member a class marks as the user's (§11.1): what a user's assistant (§1) may use. The rest is the test surface, which reaches state however the GUI looks.
 - `unavailable` — declared members the class says can't be used now (§11.1). For a keyed class, per instance.
 - `enums` — each enum a member's type names, and each enum constant of a declaring class, by name.
 
@@ -442,7 +484,7 @@ The server, `IVAssistantAutomation` and the built-in tools depend on Godot alone
 
 - All TCP I/O and command processing runs on the main thread in `_process()`
 - This is safe for scene tree access but limits throughput to frame rate (~60 Hz)
-- For a testing/accessibility interface, sub-16ms latency is adequate
+- For testing, and for an assistant whose model answers in seconds, a frame's latency is adequate
 - The server processes all pending complete messages each frame (not just one); a batch runs within one frame
 - A declared method runs on the main thread as any GUI handler does; a class whose members are not main-thread safe gates them in `is_automation_available()` or doesn't declare them
 
@@ -453,19 +495,40 @@ The server, `IVAssistantAutomation` and the built-in tools depend on Godot alone
 ```ini
 [assistant_autoload]
 IVAssistantServer="../assistant_server.gd"
+IVAssistant="../assistant/assistant.gd"
 
-[assistant]
-port=29071
+[assistant_server]
 enabled=true
 debug_only=true
-assistant_name=""
-context_file=""
+port=29071
 min_ready_delay_frames=10
+context_file=""
+
+[assistant]
+enabled=false
+assistant_name=""
+instructions_file=""
+providers=["ollama", "lm_studio", "llama_server", "gemini", "groq", "openrouter", "anthropic", "openai", "poe"]
+preset_provider=""
+small_model_tool_set="full"
+large_model_tool_set="full"
+
+[assistant_tool_sets]
+full=["describe", "get", "call", "list_widgets", "operate_widget", "list_actions", "press_action"]
+
+[assistant_provider_anthropic]
+name="Anthropic (Claude)"
+adapter="anthropic"
+url="https://api.anthropic.com/v1"
+key_url="https://platform.claude.com/settings/keys"
+model="claude-opus-5-5"
+note="..."
+; ... one section per provider (§12.4)
 ```
 
 ### 7.1 Autoload Registration
 
-The `[assistant_autoload]` section declares autoloads managed by the EditorPlugin. When the plugin is enabled in Godot's Plugin manager, `IVAssistantServer` is registered as an autoload. Projects can negate the autoload by setting `IVAssistantServer=""` in `ivoyager_override.cfg`.
+The `[assistant_autoload]` section declares autoloads managed by the EditorPlugin. When the plugin is enabled in Godot's Plugin manager, `IVAssistantServer` and `IVAssistant` are registered as autoloads. Projects can negate either by setting it to `""` in `ivoyager_override.cfg`.
 
 ### 7.2 Project helpers
 
@@ -480,14 +543,29 @@ A member that needs frames to finish (a render, a capture) starts the work and r
 
 ### 7.3 Runtime Settings
 
-The `[assistant]` section controls runtime behavior:
+The `[assistant_server]` section controls the TCP server:
 
-- `port` — TCP listen port (default: 29071)
 - `enabled` — Master enable/disable (default: true). When false, the autoload node exists but does not start the TCP server.
-- `debug_only` — If true, server only starts when `OS.is_debug_build()` is true (default: true). The export digest of doc comments (§11.5) is added only to exports in which the server can run.
-- `assistant_name` — Display name for the assistant persona (default: empty, uses project name from ProjectSettings)
-- `context_file` — Path to a text file (`res://` relative) with project-specific context for AI clients (default: empty)
+- `debug_only` — If true, server only starts when `OS.is_debug_build()` is true (default: true).
+- `port` — TCP listen port (default: 29071)
 - `min_ready_delay_frames` — Number of consecutive frames the project's `ready_predicate` must return `true` (after the lifecycle "started" signal) before the readiness gate opens (default: 10). Allows projects with deferred main-thread work after start (e.g. cross-thread initialization arriving via `call_deferred`) to settle before save/load and similar operations are permitted. See §7.4.
+- `context_file` — Path to a text file (`res://`) of project notes for a test client, which `get_project_info` gives as `context` (default: empty).
+
+The `[assistant]` section configures the user's assistant:
+
+- `enabled` — Whether the project offers the user's assistant, `IVAssistant` (default: false). When true it runs in every build, release and web included.
+- `assistant_name` — Display name for the assistant persona (default: empty, uses project name from ProjectSettings). `get_project_info` reports it too.
+- `instructions_file` — Path to a text file (`res://`) of the model's instructions, the assistant's personality (§12.1) (default: empty).
+- `feedback_url` — Where the setup wizard's experimental notice asks users to send feedback (default: the I, Voyager discussions; empty for no link).
+- `show_api_commands` — Whether a chat box shows the tools the assistant calls (default: false).
+- `show_api_commands_setting` — Whether the user may change that: in an I, Voyager Core project, `IVAssistant` registers user setting `show_api_commands` with `IVSettingsManager`, defaulting to `show_api_commands`, which the project may show as an option (default: true). False holds `show_api_commands` for every user.
+- `providers` — The model providers the setup wizard offers, in order, each an `[assistant_provider_<id>]` section (§12.4).
+- `preset_provider` — A provider every user gets, which hides the setup wizard (default: empty).
+- `small_model_tool_set`, `large_model_tool_set` — The tool set a new connection gets, by its provider's `small_models` (§12.4) (default: `full`).
+
+The `[assistant_tool_sets]` section names the tool sets a model may be given (§12.2). The plugin's own, `full`, is the whole user's surface; a project adds sets, or removes one by setting it to `null`.
+
+The export digest of doc comments (§11.5) is added to an export in which the user's assistant is enabled or the server can run, and to no other. An export leaves out text files, so `IVAssistantExportPlugin` adds `instructions_file` where the assistant is enabled and `context_file` where the server can run.
 
 Base values in `ivoyager_assistant.cfg` can be overridden per-project via `ivoyager_override.cfg` or `ivoyager_override2.cfg`.
 
@@ -541,9 +619,10 @@ Projects with `IVCoreSettings.wait_for_start = true` display a splash screen bef
 
 ### 8.3 Project Identity
 
-Projects can customize the assistant's identity via config:
+Projects can customize the assistant's identity via config (§7.3):
 - `assistant_name` — Gives the assistant a project-specific name
-- `context_file` — Points to a text file with background information, personality guidelines, or project-specific instructions for AI clients
+- `instructions_file` — The user's assistant's instructions: its personality and how to use the project's tools (§12.1)
+- `context_file` (under `[assistant_server]`) — Notes for a test client: probes, screenshots, what to restore after a test
 
 ## 9. Generic Test Sequence
 
@@ -570,7 +649,7 @@ Execute these steps in order:
 1. **Discover:** Call `get_project_info` (protocol version 4 or later) and `describe`.
 2. **Start the simulation:** If `IVCoreSettings.wait_for_start` is `true` and `IVStateManager.started` is `false`, call `IVStateManager.start`. Then poll `get_project_info` until `ready`, and `describe` again: bodies and their widgets exist now.
 3. **Verify state:** `get` `IVStateManager.started`, `IVGlobal.date`, `SelectionManager.selection`, `IVCamera.target`, and confirm reasonable values.
-4. **Exercise controls:** Find planets among `describe`'s `IVBody` instances by their flags; `SelectionManager.select_by_name` `"PLANET_MARS"`; `CameraHandler.move_to_by_name` `"PLANET_EARTH"`; pause and unpause through `IVStateManager.set_user_paused` (one batch); `SpeedManager.change_speed`.
+4. **Exercise controls:** Find planets among `describe`'s `IVBody` instances by their flags; `SelectionManager.select_by_name` `"PLANET_MARS"`, checking the selection's body (`get_body_name`), since a project may select a body as something that stands for it; `CameraHandler.move_to_by_name` `"PLANET_EARTH"`; pause and unpause through `IVStateManager.set_user_paused` (one batch); `SpeedManager.change_speed`.
    - **Widgets:** operate `IVPauseButton` and `IVSpeedButtons` and confirm the state they change.
    - **Mouse hover** (if the game renders): identify a body, an orbit line and an asteroid point under the mouse, as in §4.5.
 5. **Save/load cycle** (if the project declares the Save plugin's `IVSave`): `call` `IVSave.quicksave`, then poll `get` `IVSave.is_saving` until it is `false`. `call` `IVSave.quickload`, then poll until `IVSave.is_loading` is `false` and `IVStateManager.started` is `true`.
@@ -605,7 +684,7 @@ The script skips a step whose object or member the project doesn't declare. Exit
 
 ## 10. Core surface classes (layering principle)
 
-A class declares, for an automated action, **the same entry point its GUI widget calls, at the same abstraction level.** When a control exists in the GUI, the declared method is the one the widget's handler calls — not a lower-level primitive. This keeps an automated action and a user's button click semantically identical and on the same code path, which serves both goals in §1: faithful testing, and accessibility as genuine GUI substitution. (Operating the widget itself, §4.3, is the same path by construction.)
+A class declares, for an automated action, **the same entry point its GUI widget calls, at the same abstraction level.** When a control exists in the GUI, the declared method is the one the widget's handler calls — not a lower-level primitive. This keeps an automated action and a user's button click semantically identical and on the same code path, which serves both goals in §1: faithful testing, and an assistant whose actions are the user's own. (Operating the widget itself, §4.3, is the same path by construction.)
 
 Declaring a member below that surface is a deliberate, marked exception, and its doc comment says so. There are two in Core:
 
@@ -631,6 +710,8 @@ Declaring a member below that surface is a deliberate, marked exception, and its
 
 A class that adds a write-side member should add a row here and declare it at the widget level.
 
+**The user's members.** A user's assistant may call a widget-level entry point, and read what a user sees (the selection, the date, a body's radius, a view's state), so a class marks those as the user's in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (§11.1). A marked exception never is, nor is a test probe, nor a raw internal a widget doesn't show (`IVCamera.view_position`, `IVStateManager.building_system`). A write method no widget calls, such as `IVTimekeeper.set_time`, stays the test client's, as do the bulk HUD setters above.
+
 ## 11. Automation: classes declare their own interaction
 
 Any class — a Core singleton or program object, a tree node, a widget, or a project's own — declares what a client may read and call. The Assistant reads the declarations through Godot alone; nothing in a declaring class refers to the Assistant. This is the `PERSIST_*` pattern of the Save plugin: the class declares, a scanner reads. Core's declarations are the templates a project follows.
@@ -641,22 +722,25 @@ Constants are prefixed `AUTOMATION_`; methods carry `automation` after Godot's v
 
 - `const AUTOMATION_METHODS: Array[StringName]` — methods a client may call.
 - `const AUTOMATION_PROPERTIES: Array[StringName]` — properties a client may read: `var`s, getters, Godot-native properties (`global_position`, `visible`) or constants (`IVUnits.KM`). Writes go through methods.
+- `const AUTOMATION_USER_METHODS: Array[StringName]`, `const AUTOMATION_USER_PROPERTIES: Array[StringName]` — methods and properties that are also the user's: a user's assistant may use them, and no others (§10). They are declared members like the rest, so a member is listed once, here or in the lists above. Marking is opt-in, so a member a class forgets to mark is kept from the user's assistant, never exposed to it.
 - `const AUTOMATION_KEY: Array[StringName]` — for a class with several instances, the properties that tell one from another (`IVBody`: `name`; `IVNavButton`: `body_name`; `IVHUDsCheckBox`: `hud_type`, `body_flags`, `sbg_aliases`). A class with one instance needs none. Key properties are readable whether or not they are also in `AUTOMATION_PROPERTIES`.
 - `func is_automation_available(member: StringName) -> bool` — the class's own gates: whether a client may use `member` now. A member the class says is unavailable is listed under `unavailable` in `describe` and refused with code 5. Without this method every declared member is available.
 - `func get_automation_objects() -> Dictionary[StringName, Object]` — further objects, by role name. `IVGlobal` returns its `program` dictionary, so program objects are found under a role (`"SpeedManager"`) that survives a project substituting its own class; `IVTopUI` returns its selection manager as `"SelectionManager"`.
 - `const AUTOMATION_LIFECYCLE: Dictionary[StringName, StringName]` — on one autoload, the project's lifecycle (§11.6).
 - Widgets only: `get_automation_value()`, `set_automation_value(value)` and `get_automation_options()` (§11.7).
 
-A subclass can't redeclare a parent's constant, so, as with `PERSIST_PROPERTIES2`, it adds `AUTOMATION_METHODS2`, `AUTOMATION_PROPERTIES2` (any numeric suffix); the Assistant unions every level. A subclass may withdraw an inherited member by overriding `is_automation_available()`.
+A subclass can't redeclare a parent's constant, so, as with `PERSIST_PROPERTIES2`, it adds `AUTOMATION_METHODS2`, `AUTOMATION_USER_PROPERTIES2` and so on (any numeric suffix); the Assistant unions every level. A subclass may withdraw an inherited member by overriding `is_automation_available()`.
 
 ```gdscript
 # timekeeper.gd
-const AUTOMATION_METHODS: Array[StringName] = [
-	&"set_time",
-	&"set_time_from_date_clock_elements",
+const AUTOMATION_USER_METHODS: Array[StringName] = [
+	&"set_time_from_date_clock_elements", # the time setter widget's entry point
+	&"set_operating_system_time_sync",
 	...
 ]
-const AUTOMATION_PROPERTIES: Array[StringName] = [&"time", &"julian_day_number", ...]
+const AUTOMATION_USER_PROPERTIES: Array[StringName] = [&"time", &"julian_day_number", ...]
+const AUTOMATION_METHODS: Array[StringName] = [&"set_time", &"synchronize_with_operating_system"]
+const AUTOMATION_PROPERTIES: Array[StringName] = [&"clock_time"]
 
 ## Whether an automation client may use [param member] now: setting time needs
 ## [member IVCoreSettings.allow_time_setting] and is never done by a network client.
@@ -715,7 +799,7 @@ A type with no JSON form above may be given as Godot prints it (`"Basis(...)"`).
 
 A declared member's `##` doc comment is its description, and a class's is its own: one copy, written from a caller's point of view, so doc-comment quality is part of what a client depends on. No runtime API exposes doc comments (Godot 4.7), so the Assistant parses them from source, as plain text with BBCode reduced to Markdown code spans.
 
-An export ships scripts as binary tokens, without comments. `IVAssistantExportPlugin` therefore parses every script that declares automation members, and the scripts they extend, when an export begins, and adds the result to the export as `res://addons/ivoyager_assistant/automation_docs.json`. At runtime the Assistant reads a script's source where it has one and the digest otherwise. An export in which the server can't run (§7.3) gets no digest.
+An export ships scripts as binary tokens, without comments. `IVAssistantExportPlugin` therefore parses every script that declares automation members, and the scripts they extend, when an export begins, and adds the result to the export as `res://addons/ivoyager_assistant/automation_docs.json`. At runtime the Assistant reads a script's source where it has one and the digest otherwise. An export gets the digest where the user's assistant is enabled or the server can run (§7.3), and no other does.
 
 ### 11.6 Lifecycle
 
@@ -758,6 +842,8 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 
 **Composite widgets: their own value interface.** A widget whose state is not one control's declares `get_automation_value()` and `set_automation_value(value)`, plus `get_automation_options()` where the value is one of a set. `set_automation_value()` calls the Core method the widget's own handlers call, and returns `false` to refuse a value. The Assistant treats such a widget as one unit: the controls of its own scene (those it owns) are not widgets, though controls a project adds to it are. In Core: `IVSpeedButtons` (a speed index), `IVTrackCkbxs` (`"ecliptic"`, `"orbit"`, `"ground"`), `IVTimeSetter` (`[year, month, day, hour, minute, second]`) and `IVFocalLengthControl` (millimeters). A container without the interface (`IVHUDsBox`) is descended.
 
+**Privacy.** A `LineEdit` with `secret` set (a key, a password) reports `"secret": true` as its state, never its text, to any client; it can still be typed into. A node in `IVAssistantWidgets.PRIVATE_GROUP` (`"assistant_private"`), with everything under it, is not a widget to the user's assistant: GUI where the user deals with the assistant itself, such as the setup wizard and the chat box.
+
 **Reach.** Popups are in-tree `Window`s, and a widget meant for automation exists in the tree, hidden if need be, so its absence from `list_widgets` means the project lacks it. A hidden widget is reached by operating its opener first, which `list_widgets` names as `opened_by`; no project configures scene roots.
 
 **Guards:**
@@ -768,7 +854,85 @@ Delivered through a viewport, `ui_accept` meets `_input()` handlers before the f
 ### 11.8 Writing declarations
 
 - Declare the entry point a GUI widget calls (§10); a member below it is a marked exception whose doc comment says so.
+- Mark as the user's the widget-level entry points and what a user sees (§10), and nothing else: a remote model may drive a user's assistant, so what it may do is no more than what the user's own GUI does.
 - The doc comment is the description a client reads: say what the member does and when it does nothing, in a caller's terms.
 - Gate in `is_automation_available()` what would otherwise silently do nothing (`IVSelectionManager.select_up` with nothing above, `IVStateManager.start` once started, setting time where it isn't allowed); a method that can't tell from its arguments alone returns whether it acted (`IVSelectionManager.select_by_name`, `IVTimekeeper.set_time_from_date_clock_elements`).
-- A value a client reads but never addresses (an orbit's elements, a view's state) needs only `AUTOMATION_PROPERTIES`; it is read through the object that holds it.
+- A value a client reads but never addresses (an orbit's elements, a view's state) needs only properties; it is read through the object that holds it.
 - A project declares the same way: `planetarium/units.gd` declares the unit constants a client converts by, and a project's replacement for a Core class declares its own members.
+
+## 12. The user's assistant
+
+`IVAssistant` (§2.1) gives a model two things the project writes: instructions, and a set of tools to call. Both are the project's; the plugin generates the tools' definitions from the declarations and runs their calls through `request()`, on the user's surface alone (§11.1). The model is the user's choice, made in the setup wizard (§12.4), and the conversation sends these to it (§12.5).
+
+### 12.1 Instructions
+
+`instructions_file` (§7.3) is the model's instructions, the assistant's personality: who it is, how it talks with the user, and how to use the project's tools for what a user asks. `{assistant_name}` in it is replaced with the assistant's name. `IVAssistant.instructions` holds the result. It is written for the user's assistant; a test client's notes are the server's `context_file`.
+
+### 12.2 Tool sets
+
+A project names its tool sets under `[assistant_tool_sets]`, since what serves a model depends on its size: a large remote model takes the whole user's surface through `describe` (about 20K tokens in the Planetarium) and works through `get` and `call`, while a small local model chooses well among 10 to 20 tools, each with its own arguments. Which set a connection uses is the connection's choice.
+
+```ini
+[assistant_tool_sets]
+full=["describe", "get", "call", "list_widgets", "operate_widget", "list_actions", "press_action"]
+compact=["BodyFinder.find_bodies", "SelectionManager.select_by_name", "ViewManager.set_table_view", "..."]
+```
+
+An entry is either:
+
+- a method the user's assistant answers (`describe`, `get`, `call`, the widget and input-action methods), a tool taking that method's params (§4), or
+- `"<object>.<method>"`, a user method (§11.1) of the object at that address (§11.3), a tool taking the method's own arguments. It is named by the method, or `<object>_<method>` where two entries share a method name.
+
+`IVAssistant.get_tool_set(name)` builds an `IVAssistantToolSet` from what exists then, so a project builds it once the simulator has started. An entry the app lacks, or a method that isn't the user's, is left out and listed in `omitted` with the reason.
+
+`definitions` holds one per tool, as a model's API takes it: `{"name": ..., "description": ..., "parameters": <JSON Schema>}`. A member tool's description is the method's doc comment (§11.5), and its parameters follow the JSON forms of §11.4: an enum takes its value names, a class with a one-property key takes that value (`"PLANET_MARS"`), a default is stated and an argument without one is required. An `int` argument named for an enum of its class (`body_flags` for `BodyFlags`) takes an array of the enum's names, OR'd as flags.
+
+`call_tool(name, arguments)` runs one and returns its result, or `{"_error": {"code": ..., "message": ...}}` (§3.3), which a model reads as the tool's error and can act on: an unknown tool lists the set's tools, a wrong argument names the method's.
+
+### 12.3 What a project offers
+
+The user's members of Core's classes serve every project: selection, views, time, speed, HUDs, settings, widgets. Two of them are written to be read by an assistant and a screen reader alike, in the user's language: `IVSelectionData.get_body_data(body_name)`, a body's data as the GUI's data panel shows it, selected or not; and `IVViewManager.get_view_description()`, what the user sees now (the selection, the camera, the bodies in view, the date, time and speed). Core declares what its GUI does and shows; a tool that only an assistant needs is the project's, a class declaring user methods like any other (§7.2). The Planetarium's `BodyFinder.find_bodies` turns the words a user says ("Ganymede") into the body key the other tools take (`"MOON_GANYMEDE"`), and its `ExternalLinks.open_link` opens a page the GUI links to, as a click does; Core's `IVWikiManager.open_page` opens a body's Wikipedia page.
+
+### 12.4 Connections and the setup wizard
+
+The user connects the assistant to a model of their choosing: a server on their own computer, or a service with their own key. `IVAssistant.connections`, an `IVAssistantConnections`, holds the providers the project offers and the user's connection.
+
+**Providers.** Each is a config section, `[assistant_provider_<id>]`, and `[assistant] providers` lists those the setup wizard offers, in order. A project offers a subset, edits a section key by key in its override config, or adds its own section. The keys, all optional but `name` and `url`:
+
+| Key | Meaning |
+|---|---|
+| `name` | Display name. |
+| `adapter` | `"openai"` (OpenAI-compatible chat completions; the default), `"anthropic"` (Anthropic's Messages API), or the path of a project's `IVAssistantConnection` script. |
+| `url` | The API base, without a trailing slash. |
+| `local` | Whether the server runs on the user's computer (false). |
+| `small_models` | Whether a new connection gets `small_model_tool_set` (the same as `local`). |
+| `needs_key` | Whether the user gives a key (not `local`). |
+| `key_url`, `site` | Where the user gets a key; where they learn more or download the server. |
+| `model` | The model offered first. |
+| `note`, `web_note` | What the wizard says about it, and adds in a web build. |
+| `web` | Whether a web build offers it (true). |
+| `simple_schemas` | Whether its tool parameters must be simplified (false). |
+
+The plugin's providers, as of October 2026: three local servers on their default ports (Ollama, LM Studio, llama.cpp's `llama-server`), Google Gemini and Groq (free tiers), OpenRouter and Poe (one key for many companies' models; Poe spends a subscription's points), Anthropic and OpenAI. A project that runs or ships its own server names it in `preset_provider`: every user gets that connection, and the wizard is hidden (`has_setup_wizard()` is false). It needs no key, since a key shipped in an app is anyone's.
+
+**Connections.** `make_connection(provider, model, key, tool_set)` returns an `IVAssistantConnection`, unsaved; an empty argument takes the provider's model, a remembered key, or the tool set for the provider's model size. Its coroutines `send()` and `list_models()` make one request each, and fail with `error`, a message for the user. A conversation is an array of messages in the provider's own form, so what a model returns goes back to it unchanged (Anthropic's thinking blocks, Gemini's thought signatures): `make_user_message()` starts it, each reply's `message` is appended, and `make_tool_results()` returns calls' results. A reply gives `text`, `tool_calls` (`id`, `name`, `arguments`) and `stop` (`end`, `tool_calls`, `length`, `refusal`, `other`). The Anthropic adapter sends API version `2026-10-21`, caches the instructions, tools and conversation as a prefix, and on the models that take it asks for the API's server-side fallback on a refusal.
+
+With `simple_schemas`, `adapt_parameters()` simplifies the tool definitions for a provider that takes only part of JSON Schema (Gemini's OpenAI-compatible endpoint): an argument of any type, of a choice of forms (`anyOf`), or an object or array whose contents aren't described becomes text, which may be JSON, and `send()` turns that JSON back into a value before the call runs; `default` and `additionalProperties` are left out.
+
+**Saving.** `save_connection(connection, remember_key)` makes it the user's and writes `user://assistant/connection.cfg`: the provider, model and tool set, and the key only if the user asks it to be remembered, otherwise kept until the app quits. The key is stored unencrypted, on the user's device (in a web build, the browser's storage for the site), and sent only to its provider. `remove_connection()` removes the connection and every remembered key. `decline_setup()` records that the user asked not to be offered setup again (`is_setup_declined`), until they save a connection.
+
+**The test.** `IVAssistant.test_connection(connection)` sends the instructions and the connection's tool set with one more tool, `confirm_connection`, and asks the model to call it with a greeting. That confirms the key, the model, that the provider takes the tool definitions and that the model calls tools. It returns `{"ok": bool, "message": String}`: a greeting; or a model that called another tool (ok, but it may follow instructions poorly); or one that answered in text, or failed, with why.
+
+**The wizard.** `IVAssistant.open_setup_wizard()` opens an `IVAssistantSetupWizard`, a popup that stays open while the user works elsewhere, as when getting a key. The user picks a provider; the wizard asks the local servers for their models (in a web build only the one picked, since the browser may ask the user's permission to reach the computer's own servers), or lists a service's once a key is given; and "Test and connect" saves a connection only once the test confirms it. It says where the key is kept, and that the assistant is experimental, linking `feedback_url`. A project places its entry point: the Planetarium adds a button to Core's options popup (`IVOptionsPopup.add_button()`).
+
+**The web.** `HTTPRequest` runs on the browser's `fetch`, so a service must allow calls from a page (CORS). As of October 2026 the plugin's services do, Anthropic with the `anthropic-dangerous-direct-browser-access` header, which the adapter sends in a web build. A page can reach a local server only with the browser's permission (Chrome's and Firefox's local network access prompts) and the server's: Ollama needs `OLLAMA_ORIGINS` set to the page's origin, LM Studio its Enable CORS setting.
+
+### 12.5 The conversation and the chat box
+
+`IVAssistant.conversation`, an `IVAssistantConversation`, is the user's conversation with the assistant through their connection, and the loop that carries it. `send(text)`, a coroutine, runs a turn: the user's words go to the model with the instructions and the connection's tool set, the tools the model calls run in order on the main thread through `IVAssistantToolSet.call_tool()`, as a client's `call` does, and their results go back, until the model answers. A tool's error (§3.3) goes back as the tool's result, marked as an error, so the model can fix its call or tell the user; so do an unknown tool and arguments that aren't a JSON object. A turn stops with an error after `max_requests_per_turn` (20) requests without an answer, so a model calling tools without end can't run up a bill. `cancel()` ends a running turn. `clear()` starts the conversation over, as a change of the user's connection does, since each provider keeps a conversation in its own form.
+
+Signals report each turn, whatever the user's words came from: `turn_started(text)`; `reply_received(text)` for each reply with text, which a reply that calls tools may have too; `tool_called(tool_name, arguments)` as each tool is about to run; and `turn_finished(error, unsent_text)`, with `error` "" or why the turn stopped, for the user. `cleared()` reports a new start. The history stays one a strict provider takes: words the model never answered, because the first request failed or was stopped, are left out of it and come back as `unsent_text`; once tools have run, the calls and their results stay.
+
+**The prompt cache.** Each request sends the instructions, then the tool definitions, then the conversation, and extends the last request unchanged: the tool set is built once per conversation, and the instructions hold nothing that changes. A provider's cache then holds the prefix, and a request pays in full only for what is new (§12.4 for Anthropic's).
+
+**The chat box.** `IVAssistantChatBox` is a widget a project places, usually in a panel of its own, and styles with its theme; `user_color`, `note_color` and `error_color` give what a theme has no entry for, and `width_in_font_sizes` and `transcript_lines` its size. It shows the conversation: the connection, the user's words, the tools called while `IVAssistant.show_api_commands` is true (those already shown follow it when it changes), each reply with the Markdown a model may write taken out, and why a turn stopped. Unsent words go back in its text field. Send becomes Stop during a turn, and New starts the conversation over. With no connection, it offers the setup wizard if the project has one, with a project's `setup_note` and its setup button styled by `setup_button_type_variation`; with `offer_dismiss`, the user may dismiss the offer, and "Don't show again" declines it (`decline_setup()`), for the project to hide the chat box on `setup_dismissed`. Its text field takes focus when it is shown and lets it go on `ui_cancel`, so the app's keys work again. Each reply is an accessibility live region, which a screen reader reads as it arrives; with `speak_replies`, the system's text-to-speech speaks it too, if the project setting `audio/general/text_to_speech` is on. The user's assistant can't see or operate it (`IVAssistantWidgets.PRIVATE_GROUP`). The Planetarium puts it in a panel at the bottom center. Until Galileo is connected, the panel's button is there to offer setup, unless the user declined it; dismissing it hides the panel and its button, and connecting or disconnecting shows them. Its Options section "AI Guide" holds the setup button and the setting `show_api_commands` ("Show API Commands"), each where it exists, and is hidden where neither does, as when the assistant is enabled for the developer's test client alone.

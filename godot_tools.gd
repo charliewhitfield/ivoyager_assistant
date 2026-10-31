@@ -31,6 +31,8 @@ extends RefCounted
 const METHODS: Array[String] = ["screenshot", "warp_mouse", "get_mouse_position",
 		"project_to_screen", "list_actions", "press_action", "find_nodes", "inspect_node",
 		"read_node_text"]
+## Those a user's assistant may use: the keyboard user's surface.
+const USER_METHODS: Array[String] = ["list_actions", "press_action"]
 
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2
@@ -404,7 +406,10 @@ func _build_inspect_tree(node: Node, depth: int) -> Dictionary:
 			tab_names.append(node.get_tab_title(i))
 		result["tab_names"] = tab_names
 	elif node is LineEdit:
-		result["text"] = node.text
+		if node.secret:
+			result["secret"] = true # a key or password is never reported
+		else:
+			result["text"] = node.text
 	elif node is TextEdit:
 		result["text"] = node.text
 	elif node is FoldableContainer:

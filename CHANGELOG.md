@@ -10,15 +10,21 @@ File format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Under development using Godot 4.7.2.
 
 ### Added
+* `IVAssistant`, a second autoload: the user's assistant, turned on by `[assistant] enabled`, which answers requests in process in any build, release and web included, through new `IVAssistantDispatcher`, as the TCP server now does. It reaches only the user's surface: the members a class marks in `AUTOMATION_USER_METHODS` and `AUTOMATION_USER_PROPERTIES` (which `describe` marks, and with `user` lists alone), the widgets and the input actions. It starts Phase 5; see SPECIFICATION.md §2.1 and §11.1.
+* The user's assistant's instructions (`[assistant] instructions_file`) and the tool sets a project offers its model (`[assistant_tool_sets]`), whose definitions new `IVAssistantToolSet` generates from the declarations. See SPECIFICATION.md §12.
+* Connections to the user's model and a setup wizard: new `IVAssistantConnections` holds the providers a project offers (`[assistant_provider_<id>]` sections) and the user's connection and keys; `IVAssistantConnection` adapts OpenAI-compatible chat completions and Anthropic's Messages API; `IVAssistantSetupWizard` (`IVAssistant.open_setup_wizard()`) saves a connection once `IVAssistant.test_connection()` confirms it, says the assistant is experimental and links `[assistant] feedback_url`, and is hidden from the user's assistant by new `IVAssistantWidgets.PRIVATE_GROUP`. See SPECIFICATION.md §12.4.
+* The user's conversation with the assistant and a chat box: new `IVAssistantConversation` (`IVAssistant.conversation`) sends the user's words to their model and runs the tools it calls until it answers, and new `IVAssistantChatBox` is a widget a project places to show it, which with no connection offers the setup wizard and, with `offer_dismiss`, lets the user dismiss or decline the offer (`IVAssistantConnections.decline_setup()`). It shows the tools called per `IVAssistant.show_api_commands`: `[assistant] show_api_commands`, or in an I, Voyager Core project the user setting of that name, which `show_api_commands_setting` adds. See SPECIFICATION.md §12.5.
 * Automation: a class declares what a client may read and call (`AUTOMATION_*` constants, `is_automation_available()`, `get_automation_objects()`), and new methods `describe`, `get` and `call` discover and use those declarations through Godot alone, converting JSON by the declared types. See SPECIFICATION.md §11 and §4.1–4.2.
 * Methods `list_widgets` and `operate_widget`, which list a user's controls by their accessibility names and keys and operate them as a user does, a composite widget through its declared value interface. See SPECIFICATION.md §4.3 and §11.7.
 * JSON-RPC 2.0 batch requests, answered in order within one frame.
-* `IVAssistantExportPlugin`, which adds declared members' doc comments to an export for `describe` to report.
+* `IVAssistantExportPlugin`, which adds declared members' doc comments to every export where the user's assistant is enabled or the TCP server can run, and the text files the config names where their client runs.
 * Built-in method `get_mouse_position`; `screenshot` takes `redraw`, and `project_to_screen` a `node` address with an `offset`.
 * `AssistantClient` in `tools/assistant_test.py` has `describe()`, `get()`, `invoke()` and `batch()`, raising `AssistantError` on an error response.
 
 ### Changed
+* [Project breaking] The TCP server's config keys `enabled`, `debug_only`, `port`, `min_ready_delay_frames` and `context_file` moved from `[assistant]` to `[assistant_server]`, and `[assistant] enabled` now turns on the user's assistant. Move an override of any of them to the new section.
 * The server takes its lifecycle signals and quit from an autoload's `AUTOMATION_LIFECYCLE` declaration and refers to no Core class; `get_project_info` reports protocol version 5 and `ready`.
+* `list_widgets` and `inspect_node` report a secret `LineEdit` (a key) as `secret`, never its text.
 * `press_action`, `warp_mouse`, `list_actions`, `project_to_screen`, `screenshot` and the GUI inspection methods (formerly `GuiInspectionSuite`) are built in, needing only Godot.
 * `tools/assistant_test.py` tests through declared members, batches and widgets, and saves and loads through the Save plugin's `IVSave`.
 * `GodotLauncher` in `tools/assistant_test.py` holds each launched Godot to one logical processor of each core on Windows, which can otherwise put the busy threads of instances run at once two to a core; `one_per_core=False` leaves it unpinned. See SPECIFICATION.md §7.3.
@@ -30,6 +36,7 @@ Under development using Godot 4.7.2.
 * `tools/orbit_accuracy_test.py` compared simulator positions with Horizons kilometers unconverted, off by a factor of 1000 since the Planetarium's `METER` became 1; it converts by the declared `IVUnits.KM`.
 * `tools/orbit_accuracy_test.py` could not test a project that waits at its splash screen (`IVCoreSettings.wait_for_start`, as in the Project Template); it now calls `IVStateManager.start`.
 * `tools/assistant_test.py --launch` ran a hard-coded Godot executable unless given `--godot`; it now runs the newest build of the project's Godot major, chosen by new `tools/godot_executable.py`, which every launching script shares and which refuses rather than open the project with another major.
+* An editor start could print `Unrecognized UID` and `Failed to create an autoload` errors: the editor plugin re-added its autoload while the editor's first file scan had emptied the UID database. It now waits for the scan to end.
 
 
 ## [v0.0.4] - 2026-10-15

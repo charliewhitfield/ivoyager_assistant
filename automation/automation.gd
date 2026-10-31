@@ -25,12 +25,13 @@ extends RefCounted
 ## [code]describe[/code], [code]get[/code] and [code]call[/code] on them.
 ##
 ## Knows only Godot and the convention of SPECIFICATION.md §11: a class lists
-## what a client may call and read in [code]AUTOMATION_*[/code] constants, owns
-## its gates in [code]is_automation_available()[/code], and names further
-## objects in [code]get_automation_objects()[/code]. Objects are found among
-## the autoloads, the objects they name, and the scene tree at each request and
-## let go once it is answered, so none is kept alive here and objects freed on a
-## reset simply drop out.
+## what a client may call and read in [code]AUTOMATION_*[/code] constants, marks
+## which of them are the user's, owns its gates in
+## [code]is_automation_available()[/code], and names further objects in
+## [code]get_automation_objects()[/code]. Objects are found among the autoloads,
+## the objects they name, and the scene tree at each request and let go once it
+## is answered, so none is kept alive here and objects freed on a reset simply
+## drop out.
 
 const ERR_UNKNOWN_METHOD := 1
 const ERR_INVALID_PARAMS := 2
@@ -39,6 +40,8 @@ const ERR_NOT_ALLOWED := 5
 
 const METHODS_CONSTANT := "AUTOMATION_METHODS"
 const PROPERTIES_CONSTANT := "AUTOMATION_PROPERTIES"
+const USER_METHODS_CONSTANT := "AUTOMATION_USER_METHODS"
+const USER_PROPERTIES_CONSTANT := "AUTOMATION_USER_PROPERTIES"
 const KEY_CONSTANT := &"AUTOMATION_KEY"
 const LIFECYCLE_CONSTANT := &"AUTOMATION_LIFECYCLE"
 const AVAILABLE_METHOD := &"is_automation_available"
@@ -53,6 +56,10 @@ static var _autoload_script_names: Dictionary[String, String] = {}
 
 ## Message of the last failed resolution, or "".
 var error := ""
+## Serves only the user's surface, as for the user's assistant: the members a
+## class marks as the user's, on objects that have any (SPECIFICATION.md §11.1).
+## Set at construction.
+var user_only := false
 
 var converter: IVAssistantConverter
 var docs := IVAssistantDocs.new()
@@ -94,8 +101,9 @@ static func get_autoload_script_names() -> Dictionary[String, String]:
 	return _autoload_script_names
 
 
-func _init(tree: SceneTree) -> void:
+func _init(tree: SceneTree, is_user_only := false) -> void:
 	_tree = tree
+	user_only = is_user_only
 	converter = IVAssistantConverter.new(self)
 	if !Engine.is_editor_hint():
 		_tree.node_added.connect(_on_tree_changed)
@@ -118,11 +126,13 @@ func release() -> void:
 # requests
 
 ## [code]describe[/code]: every declared object, class, member, signature,
-## enum and availability. See SPECIFICATION.md §4.2.
+## enum and availability; only the user's surface with [code]user[/code] or
+## [member user_only]. See SPECIFICATION.md §4.2.
 func describe(params: Dictionary) -> Dictionary:
 	_refresh()
 	var full: bool = params.get("full", false)
 	var include_instances: bool = params.get("instances", true)
+	var user: bool = user_only or params.get("user", false)
 	var objects := {}
 	var classes := {}
 	var enums := {}
@@ -130,8 +140,10 @@ func describe(params: Dictionary) -> Dictionary:
 	for address in _named:
 		var object := _named[address]
 		var declaration := get_declaration_of(object)
-		var entry := _describe_declaration(declaration, full, enums)
-		var unavailable := _get_unavailable(object, declaration)
+		if user and !declaration.has_user_members():
+			continue
+		var entry := _describe_declaration(declaration, full, enums, user)
+		var unavailable := _get_unavailable(object, declaration, user)
 		if unavailable:
 			entry["unavailable"] = unavailable
 		objects[address] = entry
@@ -142,6 +154,8 @@ func describe(params: Dictionary) -> Dictionary:
 		if _names.has(object.get_instance_id()):
 			continue
 		var declaration := get_declaration_of(object)
+		if user and !declaration.has_user_members():
+			continue
 		if !groups.has(declaration.class_name_):
 			groups[declaration.class_name_] = []
 		groups[declaration.class_name_].append(object)
@@ -149,10 +163,10 @@ func describe(params: Dictionary) -> Dictionary:
 		var members: Array = groups[class_name_]
 		var first: Object = members[0]
 		var declaration := get_declaration_of(first)
-		var entry := _describe_declaration(declaration, full, enums)
+		var entry := _describe_declaration(declaration, full, enums, user)
 		described[declaration.source_script] = true
 		if members.size() == 1 and declaration.key.is_empty():
-			var unavailable := _get_unavailable(first, declaration)
+			var unavailable := _get_unavailable(first, declaration, user)
 			if unavailable:
 				entry["unavailable"] = unavailable
 			objects[String(class_name_)] = entry
@@ -164,13 +178,13 @@ func describe(params: Dictionary) -> Dictionary:
 			var instances := []
 			for object: Object in members:
 				var instance := _get_address_fields(object, declaration)
-				var unavailable := _get_unavailable(object, declaration)
+				var unavailable := _get_unavailable(object, declaration, user)
 				if unavailable:
 					instance["unavailable"] = unavailable
 				instances.append(instance)
 			entry["instances"] = instances
 		classes[String(class_name_)] = entry
-	_describe_reachable_classes(described, classes, full, enums)
+	_describe_reachable_classes(described, classes, full, enums, user)
 	return {"objects": objects, "classes": classes, "enums": enums}
 
 
@@ -180,7 +194,8 @@ func get_properties(params: Dictionary) -> Dictionary:
 	if !object:
 		return _error(ERR_NOT_FOUND, error)
 	var declaration := get_declaration_of(object)
-	var names: Array = declaration.properties + declaration.key
+	var properties := declaration.get_properties(user_only)
+	var names: Array = properties + declaration.key
 	if params.has("properties"):
 		var requested: Variant = params["properties"]
 		if typeof(requested) == TYPE_STRING:
@@ -191,10 +206,10 @@ func get_properties(params: Dictionary) -> Dictionary:
 	var result := {}
 	for property_name: Variant in names:
 		var property := StringName(str(property_name))
-		if !declaration.properties.has(property) and !declaration.key.has(property):
-			return _error(ERR_UNKNOWN_METHOD, "%s declares no property '%s' (properties: %s)"
-					% [declaration.class_name_, property, ", ".join(_to_strings(
-					declaration.properties + declaration.key))])
+		if !properties.has(property) and !declaration.key.has(property):
+			return _error(ERR_UNKNOWN_METHOD, "%s declares no %sproperty '%s' (properties: %s)"
+					% [declaration.class_name_, _user_word(), property, ", ".join(_to_strings(
+					properties + declaration.key))])
 		if !_is_available(object, declaration, property):
 			return _error(ERR_NOT_ALLOWED, "%s.%s is not available now"
 					% [declaration.class_name_, property])
@@ -214,9 +229,10 @@ func call_method(params: Dictionary) -> Variant:
 	if typeof(method_var) != TYPE_STRING or !method_var:
 		return _error(ERR_INVALID_PARAMS, "Missing or invalid 'method'")
 	var method := StringName(str(method_var))
-	if !declaration.methods.has(method):
-		return _error(ERR_UNKNOWN_METHOD, "%s declares no method '%s' (methods: %s)"
-				% [declaration.class_name_, method, ", ".join(_to_strings(declaration.methods))])
+	var methods := declaration.get_methods(user_only)
+	if !methods.has(method):
+		return _error(ERR_UNKNOWN_METHOD, "%s declares no %smethod '%s' (methods: %s)"
+				% [declaration.class_name_, _user_word(), method, ", ".join(_to_strings(methods))])
 	if !_is_available(object, declaration, method):
 		return _error(ERR_NOT_ALLOWED, "%s.%s is not available now"
 				% [declaration.class_name_, method])
@@ -281,6 +297,9 @@ func resolve(address: Variant) -> Object:
 		if !object:
 			break
 		object = _follow(object, StringName(str(hop)))
+	if object and user_only and !get_declaration_of(object).has_user_members():
+		error = "No object %s (call describe for addresses)" % JSON.stringify(address)
+		return null
 	return object
 
 
@@ -321,8 +340,11 @@ func object_to_json(object: Object, depth := 0) -> Variant:
 	if _names.has(object.get_instance_id()):
 		return _names[object.get_instance_id()]
 	var result := {"class": String(class_name_)}
-	if declaration and declaration.properties and depth < IVAssistantConverter.MAX_OBJECT_DEPTH:
-		for property in declaration.properties:
+	var properties: Array[StringName] = []
+	if declaration:
+		properties = declaration.get_properties(user_only)
+	if properties and depth < IVAssistantConverter.MAX_OBJECT_DEPTH:
+		for property in properties:
 			var info: Dictionary = declaration.property_infos.get(property, {})
 			result[String(property)] = converter.to_json(object.get(property), info, depth + 1)
 		return result
@@ -361,6 +383,12 @@ func get_declaration(script: Script) -> Declaration:
 				_append_names(declaration.methods, value)
 			elif _is_numbered_constant(name_text, PROPERTIES_CONSTANT):
 				_append_names(declaration.properties, value)
+			elif _is_numbered_constant(name_text, USER_METHODS_CONSTANT):
+				_append_names(declaration.methods, value)
+				_append_names(declaration.user_methods, value)
+			elif _is_numbered_constant(name_text, USER_PROPERTIES_CONSTANT):
+				_append_names(declaration.properties, value)
+				_append_names(declaration.user_properties, value)
 			elif constant_name == KEY_CONSTANT and declaration.key.is_empty():
 				_append_names(declaration.key, value)
 			elif constant_name == LIFECYCLE_CONSTANT and !declaration.lifecycle:
@@ -648,7 +676,7 @@ func _key_matches(object: Object, address: Dictionary) -> bool:
 		if ADDRESS_WORDS.has(str(field)):
 			continue
 		var property := StringName(str(field))
-		if !declaration.key.has(property) and !declaration.properties.has(property):
+		if !declaration.key.has(property) and !declaration.get_properties(user_only).has(property):
 			return false
 		var info: Dictionary = declaration.property_infos.get(property, {})
 		if !json_equal(converter.to_json(object.get(property), info), address[field]):
@@ -658,8 +686,9 @@ func _key_matches(object: Object, address: Dictionary) -> bool:
 
 func _follow(object: Object, property: StringName) -> Object:
 	var declaration := get_declaration_of(object)
-	if !declaration.properties.has(property):
-		error = "%s declares no property '%s' to follow" % [declaration.class_name_, property]
+	if !declaration.get_properties(user_only).has(property):
+		error = "%s declares no %sproperty '%s' to follow" % [declaration.class_name_,
+				_user_word(), property]
 		return null
 	if !_is_available(object, declaration, property):
 		error = "%s.%s is not available now" % [declaration.class_name_, property]
@@ -717,11 +746,11 @@ func _is_available(object: Object, declaration: Declaration, member: StringName)
 	return available == true
 
 
-func _get_unavailable(object: Object, declaration: Declaration) -> Array[String]:
+func _get_unavailable(object: Object, declaration: Declaration, user: bool) -> Array[String]:
 	var unavailable: Array[String] = []
 	if !declaration.has_available:
 		return unavailable
-	for member in declaration.methods + declaration.properties:
+	for member in declaration.get_methods(user) + declaration.get_properties(user):
 		if !_is_available(object, declaration, member):
 			unavailable.append(String(member))
 	return unavailable
@@ -786,16 +815,16 @@ func _convert_args(info: Dictionary, args: Variant) -> Array:
 	return values
 
 
-func _describe_declaration(declaration: Declaration, full: bool, enums: Dictionary) -> Dictionary:
+# With [param user], only the user's members; without, each of them is marked.
+func _describe_declaration(declaration: Declaration, full: bool, enums: Dictionary, user: bool
+		) -> Dictionary:
 	var script := declaration.source_script
 	var entry := {"class": String(declaration.class_name_)}
 	var description := docs.get_class_doc(script, full)
 	if description:
 		entry["description"] = description
-	entry["surface"] = "user" if ClassDB.is_parent_class(script.get_instance_base_type(),
-			&"Control") else "test"
 	var methods := {}
-	for method in declaration.methods:
+	for method in declaration.get_methods(user):
 		var info: Dictionary = declaration.method_infos.get(method, {})
 		if !info:
 			continue
@@ -803,6 +832,8 @@ func _describe_declaration(declaration: Declaration, full: bool, enums: Dictiona
 		var doc := docs.get_member_doc(script, method)
 		if doc:
 			method_entry["description"] = doc
+		if !user and declaration.user_methods.has(method):
+			method_entry["user"] = true
 		var args := []
 		var arg_infos: Array = info.get("args", [])
 		var defaults: Array = info.get("default_args", [])
@@ -825,12 +856,14 @@ func _describe_declaration(declaration: Declaration, full: bool, enums: Dictiona
 	if methods:
 		entry["methods"] = methods
 	var properties := {}
-	for property in declaration.properties:
+	for property in declaration.get_properties(user):
 		var info: Dictionary = declaration.property_infos.get(property, {})
 		var property_entry := {"type": converter.get_type_name(info)}
 		var doc := docs.get_member_doc(script, property)
 		if doc:
 			property_entry["description"] = doc
+		if !user and declaration.user_properties.has(property):
+			property_entry["user"] = true
 		_note_enum(info, enums)
 		properties[String(property)] = property_entry
 	if properties:
@@ -845,23 +878,21 @@ func _describe_declaration(declaration: Declaration, full: bool, enums: Dictiona
 	return entry
 
 
-# Classes no object exposes directly but a declared property holds, such as an
-# orbit a body holds; a client reaches them with an address's "via".
 # Classes no object exposes directly but a declared member holds or returns,
 # such as the orbit a body holds or the views a view manager holds. A client
 # reads them as values, and addresses one held in a property with "via".
 func _describe_reachable_classes(described: Dictionary[Script, bool], classes: Dictionary,
-		full: bool, enums: Dictionary) -> void:
+		full: bool, enums: Dictionary, user: bool) -> void:
 	var queue: Array[Script] = described.keys()
 	var i := 0
 	while i < queue.size():
 		var declaration := get_declaration(queue[i])
 		i += 1
 		var reaches: Array[Array] = [] # [info, path]
-		for property in declaration.properties:
+		for property in declaration.get_properties(user):
 			reaches.append([declaration.property_infos.get(property, {}),
 					"%s.%s" % [declaration.class_name_, property]])
-		for method in declaration.methods:
+		for method in declaration.get_methods(user):
 			var method_info: Dictionary = declaration.method_infos.get(method, {})
 			reaches.append([method_info.get("return", {}),
 					"%s.%s()" % [declaration.class_name_, method]])
@@ -872,7 +903,7 @@ func _describe_reachable_classes(described: Dictionary[Script, bool], classes: D
 			if !script:
 				continue
 			var reached := get_declaration(script)
-			if !reached.participates():
+			if !reached.participates() or (user and !reached.has_user_members()):
 				continue
 			var reached_name := String(reached.class_name_)
 			if described.has(script):
@@ -883,7 +914,7 @@ func _describe_reachable_classes(described: Dictionary[Script, bool], classes: D
 				continue
 			described[script] = true
 			queue.append(script)
-			var entry := _describe_declaration(reached, full, enums)
+			var entry := _describe_declaration(reached, full, enums, user)
 			entry["reached_by"] = [path]
 			classes[reached_name] = entry
 
@@ -966,6 +997,11 @@ func _error(code: int, message: String) -> Dictionary:
 	return {"_error": {"code": code, "message": message}}
 
 
+# Qualifies "declares no method" for a client that sees only the user's members.
+func _user_word() -> String:
+	return "user " if user_only else ""
+
+
 func _on_tree_changed(_node: Node) -> void:
 	_dirty = true
 
@@ -974,8 +1010,10 @@ func _on_tree_changed(_node: Node) -> void:
 class Declaration:
 	var source_script: Script
 	var class_name_: StringName # most-derived global class name, else the native class
-	var methods: Array[StringName] = []
-	var properties: Array[StringName] = []
+	var methods: Array[StringName] = [] # every declared method, the user's included
+	var properties: Array[StringName] = [] # every declared property, the user's included
+	var user_methods: Array[StringName] = []
+	var user_properties: Array[StringName] = []
 	var key: Array[StringName] = []
 	var lifecycle := {}
 	var has_available := false
@@ -986,3 +1024,14 @@ class Declaration:
 
 	func participates() -> bool:
 		return !methods.is_empty() or !properties.is_empty() or !key.is_empty() or has_objects
+
+	func has_user_members() -> bool:
+		return !user_methods.is_empty() or !user_properties.is_empty()
+
+	## The user's methods if [param user], else every declared method.
+	func get_methods(user: bool) -> Array[StringName]:
+		return user_methods if user else methods
+
+	## The user's properties if [param user], else every declared property.
+	func get_properties(user: bool) -> Array[StringName]:
+		return user_properties if user else properties
