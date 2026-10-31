@@ -1,78 +1,78 @@
-id,en
-BUTTON_ASSISTANT_CHOOSE_MODEL,Choose
-BUTTON_ASSISTANT_CLOSE,Close
-BUTTON_ASSISTANT_DISCONNECT,Disconnect
-BUTTON_ASSISTANT_DISMISS,Dismiss
-BUTTON_ASSISTANT_HIDE_KEY,Hide
-BUTTON_ASSISTANT_NEW,New
-BUTTON_ASSISTANT_SEND,Send
-BUTTON_ASSISTANT_SHOW_KEY,Show
-BUTTON_ASSISTANT_STOP,Stop
-BUTTON_ASSISTANT_TEST_AND_CONNECT,Test and connect
-CKBX_ASSISTANT_DONT_SHOW_AGAIN,Don't show again
-CKBX_ASSISTANT_REMEMBER_KEY,Remember the key on this device
-HINT_ASSISTANT_DISCONNECT,Remove the connection and forget every key
-HINT_ASSISTANT_NEW,Start a new conversation
-HINT_ASSISTANT_TOOLS,The tools the model is given. A small model does best with a short list; a large one can use more.
-LABEL_ASSISTANT_KEY,Key
-LABEL_ASSISTANT_KEY_PLACEHOLDER,Paste your key
-LABEL_ASSISTANT_MODEL,Model
-LABEL_ASSISTANT_MODEL_FROM,Model from
-LABEL_ASSISTANT_MODEL_PLACEHOLDER,A model's id
-LABEL_ASSISTANT_TOOLS,Tools
-TXT_ASSISTANT_ABOUT_PROVIDER_CONSTRUCTOR,About %s
-TXT_ASSISTANT_ASK_CONSTRUCTOR,Ask %s
-TXT_ASSISTANT_CANCELED,Canceled
-TXT_ASSISTANT_CANT_LIST_MODELS_CONSTRUCTOR,Can't list the models: %s
-TXT_ASSISTANT_CANT_REACH_CONSTRUCTOR,Can't reach %s
-TXT_ASSISTANT_CANT_REACH_WEB_CONSTRUCTOR,"Can't reach %s. A web page can reach only a server that allows it (CORS), and a local one only with the browser's permission"
-TXT_ASSISTANT_CANT_RESOLVE_CONSTRUCTOR,Can't find %s; check the internet connection
-TXT_ASSISTANT_CANT_SEND_CONSTRUCTOR,Can't send a request to %s (%s)
-TXT_ASSISTANT_CONNECTED_TO_CONSTRUCTOR,"Connected to %s, from %s."
-TXT_ASSISTANT_EXPERIMENTAL,EXPERIMENTAL. Connection has not been tested to most services.
-TXT_ASSISTANT_FEEDBACK_CONSTRUCTOR,Please give us feedback [url=%s]here[/url].
-TXT_ASSISTANT_GET_KEY_CONSTRUCTOR,Get a key from %s
-TXT_ASSISTANT_HTTP_ERROR_CONSTRUCTOR,%s answered %s: %s
-TXT_ASSISTANT_KEY_STORED_CONSTRUCTOR,"Your key is stored only on this device, in this app's data, and sent only to %s."
-TXT_ASSISTANT_KEY_STORED_WEB_CONSTRUCTOR,"Your key is stored only in this browser, for this site, and sent only to %s."
-TXT_ASSISTANT_LOCAL_PROVIDER_CONSTRUCTOR,"%s, on this computer"
-TXT_ASSISTANT_MODEL_DECLINED,The model declined to answer.
-TXT_ASSISTANT_NEEDS_KEY,Paste your key.
-TXT_ASSISTANT_NEEDS_MODEL,Choose a model.
-TXT_ASSISTANT_NOTE_ANTHROPIC,"Claude models, paid with API credits. Claude Max and Team plans include API credits each month: claim them in claude.ai under Settings, Billing."
-TXT_ASSISTANT_NOTE_GEMINI,Has a free tier with a Google account. Google may use what you send on the free tier to improve its products.
-TXT_ASSISTANT_NOTE_GROQ,"Fast open models, with a free plan whose limits are low."
-TXT_ASSISTANT_NOTE_LLAMA_SERVER,"Free and private: llama.cpp's llama-server, running a model that takes tools."
-TXT_ASSISTANT_NOTE_LM_STUDIO,"Free and private, if this computer can run a model. Install LM Studio, download a model trained for tool use, and start its server."
-TXT_ASSISTANT_NOTE_OLLAMA,"Free and private, if this computer can run a model. Install Ollama, then download a model that takes tools, such as qwen3."
-TXT_ASSISTANT_NOTE_OPENAI,"GPT models, paid with API credits."
-TXT_ASSISTANT_NOTE_OPENROUTER,"One key for hundreds of models from many companies, paid with credits. Some models are free, within daily limits."
-TXT_ASSISTANT_NOTE_POE,"Models from many companies, paid with a Poe subscription's points."
-TXT_ASSISTANT_NOT_CONNECTED,Not connected.
-TXT_ASSISTANT_NOT_CONNECTED_CONSTRUCTOR,%s isn't connected to an AI model.
-TXT_ASSISTANT_NOT_JSON_CONSTRUCTOR,%s sent a response that isn't JSON
-TXT_ASSISTANT_NO_MESSAGE,no message
-TXT_ASSISTANT_NO_TOOL_SET_CONSTRUCTOR,The app has no tool set '%s'
-TXT_ASSISTANT_REPLY_CUT_OFF,The reply was cut off.
-TXT_ASSISTANT_REQUEST_LIMIT_CONSTRUCTOR,Stopped after %s requests to the model without an answer.
-TXT_ASSISTANT_SERVER_NOT_FOUND_CONSTRUCTOR,"%s isn't running on this computer, or can't be reached."
-TXT_ASSISTANT_SERVER_NO_MODELS_CONSTRUCTOR,%s is running but has no models. Download one that takes tools.
-TXT_ASSISTANT_SETUP_INTRO_CONSTRUCTOR,"%s is an AI guide. Ask it about what you see, or to take you somewhere, and it operates the app for you. It runs on an AI model you choose: one on this computer, free if your computer can run one, or an online service with your own key, which charges for what you use or has a free tier."
-TXT_ASSISTANT_SETUP_TITLE_CONSTRUCTOR,Set up %s
-TXT_ASSISTANT_SET_UP_CONSTRUCTOR,Set up %s...
-TXT_ASSISTANT_STOPPED,Stopped.
-TXT_ASSISTANT_TESTING_CONSTRUCTOR,Asking %s to call a tool...
-TXT_ASSISTANT_TEST_CONNECTED,Connected: the model called the test tool.
-TXT_ASSISTANT_TEST_CUT_OFF,The model's reply was cut off before it called a tool.
-TXT_ASSISTANT_TEST_DECLINED,The model declined the test.
-TXT_ASSISTANT_TEST_GREETING_CONSTRUCTOR,"Connected. %s says: ""%s"""
-TXT_ASSISTANT_TEST_NO_TOOL_CONSTRUCTOR,"The model answered without calling a tool, so it may not take tools. It said: ""%s"""
-TXT_ASSISTANT_TEST_WRONG_TOOL_CONSTRUCTOR,"Connected, but the model called %s, not the test tool. It may follow instructions poorly."
-TXT_ASSISTANT_THINKING_CONSTRUCTOR,%s is thinking...
-TXT_ASSISTANT_TIMEOUT_CONSTRUCTOR,%s didn't answer in time
-TXT_ASSISTANT_TLS_FAILED_CONSTRUCTOR,A secure connection to %s failed
-TXT_ASSISTANT_UNREADABLE_REPLY_CONSTRUCTOR,%s sent a reply that can't be read
-TXT_ASSISTANT_USING_MODEL_CONSTRUCTOR,"%s is using %s, from %s."
-TXT_ASSISTANT_WEB_NOTE_LLAMA_SERVER,A web page can reach it only with the browser's permission.
-TXT_ASSISTANT_WEB_NOTE_LM_STUDIO,"A web page can reach it only with Enable CORS on in its server settings, and the browser's permission."
-TXT_ASSISTANT_WEB_NOTE_OLLAMA,"A web page can reach Ollama only if Ollama is started with OLLAMA_ORIGINS set to this site's address, and the browser allows it."
+id,en,de
+BUTTON_ASSISTANT_CHOOSE_MODEL,Choose,Auswählen
+BUTTON_ASSISTANT_CLOSE,Close,Schließen
+BUTTON_ASSISTANT_DISCONNECT,Disconnect,Trennen
+BUTTON_ASSISTANT_DISMISS,Dismiss,Ausblenden
+BUTTON_ASSISTANT_HIDE_KEY,Hide,Ausblenden
+BUTTON_ASSISTANT_NEW,New,Neu
+BUTTON_ASSISTANT_SEND,Send,Senden
+BUTTON_ASSISTANT_SHOW_KEY,Show,Anzeigen
+BUTTON_ASSISTANT_STOP,Stop,Stopp
+BUTTON_ASSISTANT_TEST_AND_CONNECT,Test and connect,Testen und verbinden
+CKBX_ASSISTANT_DONT_SHOW_AGAIN,Don't show again,Nicht mehr anzeigen
+CKBX_ASSISTANT_REMEMBER_KEY,Remember the key on this device,Schlüssel auf diesem Gerät speichern
+HINT_ASSISTANT_DISCONNECT,Remove the connection and forget every key,Die Verbindung entfernen und alle Schlüssel vergessen
+HINT_ASSISTANT_NEW,Start a new conversation,Ein neues Gespräch beginnen
+HINT_ASSISTANT_TOOLS,The tools the model is given. A small model does best with a short list; a large one can use more.,"Die Werkzeuge, die das Modell erhält. Ein kleines Modell kommt mit einer kurzen Liste am besten zurecht, ein großes kann mehr nutzen."
+LABEL_ASSISTANT_KEY,Key,Schlüssel
+LABEL_ASSISTANT_KEY_PLACEHOLDER,Paste your key,Schlüssel einfügen
+LABEL_ASSISTANT_MODEL,Model,Modell
+LABEL_ASSISTANT_MODEL_FROM,Model from,Modell von
+LABEL_ASSISTANT_MODEL_PLACEHOLDER,A model's id,Modell-ID
+LABEL_ASSISTANT_TOOLS,Tools,Werkzeuge
+TXT_ASSISTANT_ABOUT_PROVIDER_CONSTRUCTOR,About %s,Über %s
+TXT_ASSISTANT_ASK_CONSTRUCTOR,Ask %s,%s fragen
+TXT_ASSISTANT_CANCELED,Canceled,Abgebrochen
+TXT_ASSISTANT_CANT_LIST_MODELS_CONSTRUCTOR,Can't list the models: %s,Die Modelle können nicht aufgelistet werden: %s
+TXT_ASSISTANT_CANT_REACH_CONSTRUCTOR,Can't reach %s,%s ist nicht erreichbar
+TXT_ASSISTANT_CANT_REACH_WEB_CONSTRUCTOR,"Can't reach %s. A web page can reach only a server that allows it (CORS), and a local one only with the browser's permission","%s ist nicht erreichbar. Eine Webseite erreicht nur einen Server, der es erlaubt (CORS), und einen lokalen nur mit der Erlaubnis des Browsers"
+TXT_ASSISTANT_CANT_RESOLVE_CONSTRUCTOR,Can't find %s; check the internet connection,%s wurde nicht gefunden; prüfen Sie die Internetverbindung
+TXT_ASSISTANT_CANT_SEND_CONSTRUCTOR,Can't send a request to %s (%s),Anfrage an %s kann nicht gesendet werden (%s)
+TXT_ASSISTANT_CONNECTED_TO_CONSTRUCTOR,"Connected to %s, from %s.",Verbunden mit %s von %s.
+TXT_ASSISTANT_EXPERIMENTAL,EXPERIMENTAL. Connection has not been tested to most services.,EXPERIMENTELL. Die Verbindung zu den meisten Diensten wurde nicht getestet.
+TXT_ASSISTANT_FEEDBACK_CONSTRUCTOR,Please give us feedback [url=%s]here[/url].,Bitte geben Sie uns [url=%s]hier[/url] Feedback.
+TXT_ASSISTANT_GET_KEY_CONSTRUCTOR,Get a key from %s,Schlüssel bei %s holen
+TXT_ASSISTANT_HTTP_ERROR_CONSTRUCTOR,%s answered %s: %s,%s antwortete %s: %s
+TXT_ASSISTANT_KEY_STORED_CONSTRUCTOR,"Your key is stored only on this device, in this app's data, and sent only to %s.",Ihr Schlüssel wird nur auf diesem Gerät in den Daten dieser App gespeichert und nur an %s gesendet.
+TXT_ASSISTANT_KEY_STORED_WEB_CONSTRUCTOR,"Your key is stored only in this browser, for this site, and sent only to %s.",Ihr Schlüssel wird nur in diesem Browser für diese Website gespeichert und nur an %s gesendet.
+TXT_ASSISTANT_LOCAL_PROVIDER_CONSTRUCTOR,"%s, on this computer","%s, auf diesem Computer"
+TXT_ASSISTANT_MODEL_DECLINED,The model declined to answer.,Das Modell hat die Antwort verweigert.
+TXT_ASSISTANT_NEEDS_KEY,Paste your key.,Fügen Sie Ihren Schlüssel ein.
+TXT_ASSISTANT_NEEDS_MODEL,Choose a model.,Wählen Sie ein Modell.
+TXT_ASSISTANT_NOTE_ANTHROPIC,"Claude models, paid with API credits. Claude Max and Team plans include API credits each month: claim them in claude.ai under Settings, Billing.","Claude-Modelle, bezahlt mit API-Guthaben. Die Tarife Claude Max und Team enthalten jeden Monat API-Guthaben: Fordern Sie es in claude.ai unter Einstellungen, Abrechnung an."
+TXT_ASSISTANT_NOTE_GEMINI,Has a free tier with a Google account. Google may use what you send on the free tier to improve its products.,"Hat ein kostenloses Kontingent mit einem Google-Konto. Google darf, was Sie im kostenlosen Kontingent senden, zur Verbesserung seiner Produkte nutzen."
+TXT_ASSISTANT_NOTE_GROQ,"Fast open models, with a free plan whose limits are low.","Schnelle offene Modelle, mit einem kostenlosen Tarif mit niedrigen Limits."
+TXT_ASSISTANT_NOTE_LLAMA_SERVER,"Free and private: llama.cpp's llama-server, running a model that takes tools.","Kostenlos und privat: llama-server von llama.cpp, mit einem Modell, das Werkzeuge nutzen kann."
+TXT_ASSISTANT_NOTE_LM_STUDIO,"Free and private, if this computer can run a model. Install LM Studio, download a model trained for tool use, and start its server.","Kostenlos und privat, wenn dieser Computer ein Modell ausführen kann. Installieren Sie LM Studio, laden Sie ein für Werkzeugnutzung trainiertes Modell herunter und starten Sie seinen Server."
+TXT_ASSISTANT_NOTE_OLLAMA,"Free and private, if this computer can run a model. Install Ollama, then download a model that takes tools, such as qwen3.","Kostenlos und privat, wenn dieser Computer ein Modell ausführen kann. Installieren Sie Ollama und laden Sie dann ein Modell herunter, das Werkzeuge nutzen kann, etwa qwen3."
+TXT_ASSISTANT_NOTE_OPENAI,"GPT models, paid with API credits.","GPT-Modelle, bezahlt mit API-Guthaben."
+TXT_ASSISTANT_NOTE_OPENROUTER,"One key for hundreds of models from many companies, paid with credits. Some models are free, within daily limits.","Ein Schlüssel für Hunderte Modelle vieler Firmen, bezahlt mit Guthaben. Einige Modelle sind innerhalb täglicher Limits kostenlos."
+TXT_ASSISTANT_NOTE_POE,"Models from many companies, paid with a Poe subscription's points.","Modelle vieler Firmen, bezahlt mit den Punkten eines Poe-Abos."
+TXT_ASSISTANT_NOT_CONNECTED,Not connected.,Nicht verbunden.
+TXT_ASSISTANT_NOT_CONNECTED_CONSTRUCTOR,%s isn't connected to an AI model.,%s ist mit keinem KI-Modell verbunden.
+TXT_ASSISTANT_NOT_JSON_CONSTRUCTOR,%s sent a response that isn't JSON,"%s hat eine Antwort gesendet, die kein JSON ist"
+TXT_ASSISTANT_NO_MESSAGE,no message,keine Meldung
+TXT_ASSISTANT_NO_TOOL_SET_CONSTRUCTOR,The app has no tool set '%s',Die App hat keinen Werkzeugsatz „%s“
+TXT_ASSISTANT_REPLY_CUT_OFF,The reply was cut off.,Die Antwort wurde abgeschnitten.
+TXT_ASSISTANT_REQUEST_LIMIT_CONSTRUCTOR,Stopped after %s requests to the model without an answer.,Nach %s Anfragen an das Modell ohne Antwort angehalten.
+TXT_ASSISTANT_SERVER_NOT_FOUND_CONSTRUCTOR,"%s isn't running on this computer, or can't be reached.",%s läuft nicht auf diesem Computer oder ist nicht erreichbar.
+TXT_ASSISTANT_SERVER_NO_MODELS_CONSTRUCTOR,%s is running but has no models. Download one that takes tools.,"%s läuft, hat aber keine Modelle. Laden Sie eines herunter, das Werkzeuge nutzen kann."
+TXT_ASSISTANT_SETUP_INTRO_CONSTRUCTOR,"%s is an AI guide. Ask it about what you see, or to take you somewhere, and it operates the app for you. It runs on an AI model you choose: one on this computer, free if your computer can run one, or an online service with your own key, which charges for what you use or has a free tier.","%s ist ein KI-Guide. Fragen Sie ihn nach dem, was Sie sehen, oder lassen Sie sich irgendwohin bringen, und er bedient die App für Sie. Er läuft auf einem KI-Modell Ihrer Wahl: einem auf diesem Computer, kostenlos, wenn Ihr Computer eines ausführen kann, oder einem Onlinedienst mit Ihrem eigenen Schlüssel, der nach Nutzung abrechnet oder ein kostenloses Kontingent hat."
+TXT_ASSISTANT_SETUP_TITLE_CONSTRUCTOR,Set up %s,%s einrichten
+TXT_ASSISTANT_SET_UP_CONSTRUCTOR,Set up %s...,%s einrichten...
+TXT_ASSISTANT_STOPPED,Stopped.,Angehalten.
+TXT_ASSISTANT_TESTING_CONSTRUCTOR,Asking %s to call a tool...,"%s wird gebeten, ein Werkzeug aufzurufen..."
+TXT_ASSISTANT_TEST_CONNECTED,Connected: the model called the test tool.,Verbunden: Das Modell hat das Testwerkzeug aufgerufen.
+TXT_ASSISTANT_TEST_CUT_OFF,The model's reply was cut off before it called a tool.,"Die Antwort des Modells wurde abgeschnitten, bevor es ein Werkzeug aufrief."
+TXT_ASSISTANT_TEST_DECLINED,The model declined the test.,Das Modell hat den Test verweigert.
+TXT_ASSISTANT_TEST_GREETING_CONSTRUCTOR,"Connected. %s says: ""%s""",Verbunden. %s sagt: „%s“
+TXT_ASSISTANT_TEST_NO_TOOL_CONSTRUCTOR,"The model answered without calling a tool, so it may not take tools. It said: ""%s""","Das Modell hat geantwortet, ohne ein Werkzeug aufzurufen, und kann daher vielleicht keine Werkzeuge nutzen. Es sagte: „%s“"
+TXT_ASSISTANT_TEST_WRONG_TOOL_CONSTRUCTOR,"Connected, but the model called %s, not the test tool. It may follow instructions poorly.","Verbunden, aber das Modell hat %s aufgerufen, nicht das Testwerkzeug. Es befolgt Anweisungen vielleicht schlecht."
+TXT_ASSISTANT_THINKING_CONSTRUCTOR,%s is thinking...,%s denkt nach...
+TXT_ASSISTANT_TIMEOUT_CONSTRUCTOR,%s didn't answer in time,%s hat nicht rechtzeitig geantwortet
+TXT_ASSISTANT_TLS_FAILED_CONSTRUCTOR,A secure connection to %s failed,Eine sichere Verbindung zu %s ist fehlgeschlagen
+TXT_ASSISTANT_UNREADABLE_REPLY_CONSTRUCTOR,%s sent a reply that can't be read,"%s hat eine Antwort gesendet, die nicht gelesen werden kann"
+TXT_ASSISTANT_USING_MODEL_CONSTRUCTOR,"%s is using %s, from %s.",%s nutzt %s von %s.
+TXT_ASSISTANT_WEB_NOTE_LLAMA_SERVER,A web page can reach it only with the browser's permission.,Eine Webseite erreicht ihn nur mit der Erlaubnis des Browsers.
+TXT_ASSISTANT_WEB_NOTE_LM_STUDIO,"A web page can reach it only with Enable CORS on in its server settings, and the browser's permission.","Eine Webseite erreicht ihn nur, wenn in seinen Servereinstellungen Enable CORS eingeschaltet ist, und mit der Erlaubnis des Browsers."
+TXT_ASSISTANT_WEB_NOTE_OLLAMA,"A web page can reach Ollama only if Ollama is started with OLLAMA_ORIGINS set to this site's address, and the browser allows it.","Eine Webseite erreicht Ollama nur, wenn Ollama mit OLLAMA_ORIGINS auf die Adresse dieser Website gestartet wird und der Browser es erlaubt."
