@@ -49,9 +49,14 @@ var _local_models: Dictionary[String, Array] = {} # by provider, for the servers
 var _listed_models: Array[String] = []
 var _request_count := 0 # each request's result is current only if no later one started
 var _probing := false
+var _status_key := ""
+var _status_values: Array[String] = []
 
 var _content: VBoxContainer
 var _row_labels: Array[Label] = []
+var _heading: Label
+var _intro: Label
+var _notice: RichTextLabel
 var _providers: OptionButton
 var _note: Label
 var _link: LinkButton
@@ -85,6 +90,18 @@ func _init(connections: IVAssistantConnections, test: Callable, assistant_name: 
 	transient = true
 	visible = false
 	_build()
+
+
+func _notification(what: int) -> void:
+	# Composed text, which a control can't retranslate itself.
+	if what != NOTIFICATION_TRANSLATION_CHANGED or !_content:
+		return
+	_show_intro()
+	_update_provider_items()
+	var provider := _connections.get_provider(_get_provider_id())
+	if provider:
+		_show_provider_text(provider)
+	_show_status()
 
 
 func _shortcut_input(event: InputEvent) -> void:
@@ -129,31 +146,23 @@ func _build() -> void:
 	_content = VBoxContainer.new()
 	add_child(_content)
 	var intro_group := _add_group()
-	var heading := Label.new()
-	intro_group.add_child(heading)
-	heading.text = tr("Set up %s") % _assistant_name
-	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var intro := _add_text(intro_group)
-	intro.text = tr("%s is an AI guide. Ask it about what you see, or to take you somewhere,"
-			+ " and it operates the app for you. It runs on an AI model you choose: one on this"
-			+ " computer, free if your computer can run one, or an online service with your own"
-			+ " key, which charges for what you use or has a free tier.") % _assistant_name
-	var notice := RichTextLabel.new()
-	intro_group.add_child(notice)
-	notice.auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED
-	notice.bbcode_enabled = true
-	notice.fit_content = true
-	notice.scroll_active = false
-	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	notice.add_theme_color_override(&"default_color", WARNING_COLOR)
-	var notice_text := tr("EXPERIMENTAL. Connection has not been tested to most services.")
-	if _feedback_url:
-		notice_text += " " + tr("Please give us feedback [url=%s]here[/url].") % _feedback_url
-	notice.text = notice_text
-	notice.meta_clicked.connect(_on_notice_meta_clicked)
+	_heading = Label.new()
+	intro_group.add_child(_heading)
+	_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_intro = _add_text(intro_group)
+	_notice = RichTextLabel.new()
+	intro_group.add_child(_notice)
+	_notice.auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED
+	_notice.bbcode_enabled = true
+	_notice.fit_content = true
+	_notice.scroll_active = false
+	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_notice.add_theme_color_override(&"default_color", WARNING_COLOR)
+	_notice.meta_clicked.connect(_on_notice_meta_clicked)
+	_show_intro()
 	var provider_group := _add_group()
 	_providers = OptionButton.new()
-	_add_row(provider_group, tr("Model from"), _providers)
+	_add_row(provider_group, &"LABEL_ASSISTANT_MODEL_FROM", _providers)
 	_providers.item_selected.connect(_on_provider_selected)
 	_note = _add_text(provider_group)
 	_link = LinkButton.new()
@@ -162,36 +171,36 @@ func _build() -> void:
 	_key_group = _add_group()
 	_key_edit = LineEdit.new()
 	_key_edit.secret = true
-	_key_edit.placeholder_text = tr("Paste your key")
-	var key_row := _add_row(_key_group, tr("Key"), _key_edit)
+	_key_edit.placeholder_text = &"LABEL_ASSISTANT_KEY_PLACEHOLDER"
+	var key_row := _add_row(_key_group, &"LABEL_ASSISTANT_KEY", _key_edit)
 	_key_edit.text_changed.connect(_on_key_changed)
 	_key_edit.text_submitted.connect(_list_models.unbind(1))
 	_key_edit.focus_exited.connect(_on_key_focus_exited)
 	_show_key = Button.new()
 	key_row.add_child(_show_key)
-	_show_key.text = tr("Show")
+	_show_key.text = &"BUTTON_ASSISTANT_SHOW_KEY"
 	_show_key.toggle_mode = true
 	_show_key.toggled.connect(_on_show_key_toggled)
 	_remember_key = CheckBox.new()
 	_key_group.add_child(_remember_key)
-	_remember_key.text = tr("Remember the key on this device")
+	_remember_key.text = &"CKBX_ASSISTANT_REMEMBER_KEY"
 	_remember_key.button_pressed = true
 	_key_note = _add_text(_key_group)
 	var model_group := _add_group()
 	_model_edit = LineEdit.new()
-	var model_row := _add_row(model_group, tr("Model"), _model_edit)
+	_model_edit.placeholder_text = &"LABEL_ASSISTANT_MODEL_PLACEHOLDER"
+	var model_row := _add_row(model_group, &"LABEL_ASSISTANT_MODEL", _model_edit)
 	_models_button = MenuButton.new()
 	model_row.add_child(_models_button)
-	_models_button.text = tr("Choose")
+	_models_button.text = &"BUTTON_ASSISTANT_CHOOSE_MODEL"
 	_models_button.flat = false
 	_models_button.get_popup().index_pressed.connect(_on_model_chosen)
 	_tool_sets = OptionButton.new()
-	_tool_set_row = _add_row(model_group, tr("Tools"), _tool_sets)
+	_tool_set_row = _add_row(model_group, &"LABEL_ASSISTANT_TOOLS", _tool_sets)
 	for tool_set_name in _tool_set_names:
 		_tool_sets.add_item(tool_set_name)
 	_tool_set_row.visible = _tool_set_names.size() > 1
-	_tool_set_row.tooltip_text = tr("The tools the model is given. A small model does best"
-			+ " with a short list; a large one can use more.")
+	_tool_set_row.tooltip_text = &"HINT_ASSISTANT_TOOLS"
 	var status_group := _add_group()
 	_status = _add_text(status_group)
 	var buttons := HBoxContainer.new()
@@ -200,16 +209,16 @@ func _build() -> void:
 	buttons.add_theme_constant_override("separation", 24)
 	_connect_button = Button.new()
 	buttons.add_child(_connect_button)
-	_connect_button.text = tr("Test and connect")
+	_connect_button.text = &"BUTTON_ASSISTANT_TEST_AND_CONNECT"
 	_connect_button.pressed.connect(_on_connect_pressed)
 	_remove_button = Button.new()
 	buttons.add_child(_remove_button)
-	_remove_button.text = tr("Disconnect")
-	_remove_button.tooltip_text = tr("Remove the connection and forget every key")
+	_remove_button.text = &"BUTTON_ASSISTANT_DISCONNECT"
+	_remove_button.tooltip_text = &"HINT_ASSISTANT_DISCONNECT"
 	_remove_button.pressed.connect(_on_remove_pressed)
 	var close_button := Button.new()
 	buttons.add_child(close_button)
-	close_button.text = tr("Close")
+	close_button.text = &"BUTTON_ASSISTANT_CLOSE"
 	close_button.pressed.connect(hide)
 
 
@@ -226,12 +235,12 @@ func _add_text(group: VBoxContainer) -> Label:
 	return label
 
 
-func _add_row(group: VBoxContainer, label_text: String, control: Control) -> HBoxContainer:
+func _add_row(group: VBoxContainer, text_key: StringName, control: Control) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	group.add_child(row)
 	var label := Label.new()
 	row.add_child(label)
-	label.text = label_text
+	label.text = text_key
 	_row_labels.append(label)
 	row.add_child(control)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -241,6 +250,33 @@ func _add_row(group: VBoxContainer, label_text: String, control: Control) -> HBo
 func _tr_value(provider: Dictionary, key: String) -> String:
 	var text: String = provider[key]
 	return tr(text)
+
+
+func _show_intro() -> void:
+	_heading.text = tr(&"TXT_ASSISTANT_SETUP_TITLE_CONSTRUCTOR") % _assistant_name
+	_intro.text = tr(&"TXT_ASSISTANT_SETUP_INTRO_CONSTRUCTOR") % _assistant_name
+	var notice_text := tr(&"TXT_ASSISTANT_EXPERIMENTAL")
+	if _feedback_url:
+		notice_text += " " + tr(&"TXT_ASSISTANT_FEEDBACK_CONSTRUCTOR") % _feedback_url
+	_notice.text = notice_text
+
+
+# The status is kept as a text key and values, to translate again when the
+# language changes. Values translate too, since a provider's name may be a key.
+func _set_status(text_key: String, values: Array[String] = []) -> void:
+	_status_key = text_key
+	_status_values = values
+	_show_status()
+
+
+func _show_status() -> void:
+	var text := tr(_status_key)
+	if _status_values:
+		var translated_values: Array[String] = []
+		for value in _status_values:
+			translated_values.append(tr(value))
+		text = text % translated_values
+	_status.text = text
 
 
 # A popup grows to fit its content but never shrinks back on its own.
@@ -267,7 +303,7 @@ func _update_provider_items() -> void:
 		var provider := _connections.get_provider(provider_id)
 		var item_text: String = _tr_value(provider, "name")
 		if provider["local"]:
-			item_text = tr("%s, on this computer") % item_text
+			item_text = tr(&"TXT_ASSISTANT_LOCAL_PROVIDER_CONSTRUCTOR") % item_text
 			if _local_models.has(provider_id):
 				item_text += " ✓"
 		_providers.add_item(item_text)
@@ -283,34 +319,15 @@ func _show_provider(provider_id: String) -> void:
 		return
 	var connection := _connections.connection
 	var is_saved := connection and connection.provider_id == provider_id
-	var provider_name: String = _tr_value(provider, "name")
-	var note: String = _tr_value(provider, "note")
-	if OS.has_feature("web") and provider["web_note"]:
-		note += " " + _tr_value(provider, "web_note")
-	_note.text = note.strip_edges()
-	_note.visible = _note.text != ""
+	_show_provider_text(provider)
 	var needs_key: bool = provider["needs_key"]
-	if needs_key and provider["key_url"]:
-		_link.text = tr("Get a key from %s") % provider_name
-		_link.uri = provider["key_url"]
-	else:
-		_link.text = tr("About %s") % provider_name
-		_link.uri = provider["site"]
-	_link.visible = _link.uri != ""
 	_key_group.visible = needs_key
 	var remembered_key := _connections.get_remembered_key(provider_id)
 	_key_edit.text = remembered_key
 	if is_saved and connection.api_key:
 		_key_edit.text = connection.api_key
 	_remember_key.button_pressed = remembered_key != "" or !is_saved
-	if OS.has_feature("web"):
-		_key_note.text = tr("Your key is stored only in this browser, for this site, and sent"
-				+ " only to %s.") % provider_name
-	else:
-		_key_note.text = tr("Your key is stored only on this device, in this app's data, and"
-				+ " sent only to %s.") % provider_name
 	_model_edit.text = connection.model if is_saved else provider["model"]
-	_model_edit.placeholder_text = tr("A model's id")
 	var tool_set_name := (connection.tool_set_name if is_saved
 			else _connections.get_default_tool_set(provider_id))
 	_tool_sets.select(_tool_set_names.find(tool_set_name))
@@ -328,14 +345,35 @@ func _show_provider(provider_id: String) -> void:
 		_list_models()
 
 
+func _show_provider_text(provider: Dictionary) -> void:
+	var provider_name: String = _tr_value(provider, "name")
+	var note: String = _tr_value(provider, "note")
+	if OS.has_feature("web") and provider["web_note"]:
+		note += " " + _tr_value(provider, "web_note")
+	_note.text = note.strip_edges()
+	_note.visible = _note.text != ""
+	var needs_key: bool = provider["needs_key"]
+	if needs_key and provider["key_url"]:
+		_link.text = tr(&"TXT_ASSISTANT_GET_KEY_CONSTRUCTOR") % provider_name
+		_link.uri = provider["key_url"]
+	else:
+		_link.text = tr(&"TXT_ASSISTANT_ABOUT_PROVIDER_CONSTRUCTOR") % provider_name
+		_link.uri = provider["site"]
+	_link.visible = _link.uri != ""
+	var key_note_key := &"TXT_ASSISTANT_KEY_STORED_CONSTRUCTOR"
+	if OS.has_feature("web"):
+		key_note_key = &"TXT_ASSISTANT_KEY_STORED_WEB_CONSTRUCTOR"
+	_key_note.text = tr(key_note_key) % provider_name
+
+
 func _show_connection() -> void:
 	var connection := _connections.connection
 	_remove_button.disabled = connection == null
 	if !connection:
-		_status.text = tr("Not connected.")
+		_set_status("TXT_ASSISTANT_NOT_CONNECTED")
 		return
-	_status.text = tr("Connected to %s, from %s.") % [connection.model,
-			tr(connection.provider_name)]
+	_set_status("TXT_ASSISTANT_CONNECTED_TO_CONSTRUCTOR", [connection.model,
+			connection.provider_name])
 
 
 func _set_model_menu(models: Array[String]) -> void:
@@ -359,10 +397,10 @@ func _find_local_servers(provider_ids: Array[String] = []) -> void:
 	var provider := _connections.get_provider(provider_id)
 	if !provider or !provider["local"]:
 		return
+	var provider_name: String = provider["name"]
 	if !_local_models.has(provider_id):
 		if provider_ids.has(provider_id) or !OS.has_feature("web"):
-			_status.text = (tr("%s isn't running on this computer, or can't be reached.")
-					% _tr_value(provider, "name"))
+			_set_status("TXT_ASSISTANT_SERVER_NOT_FOUND_CONSTRUCTOR", [provider_name])
 		return
 	var models: Array[String] = []
 	models.assign(_local_models[provider_id])
@@ -370,8 +408,7 @@ func _find_local_servers(provider_ids: Array[String] = []) -> void:
 	if !_model_edit.text and models:
 		_model_edit.text = models[0]
 	if !models:
-		_status.text = tr("%s is running but has no models. Download one that takes tools.") % (
-				_tr_value(provider, "name"))
+		_set_status("TXT_ASSISTANT_SERVER_NO_MODELS_CONSTRUCTOR", [provider_name])
 
 
 func _list_models() -> void:
@@ -385,7 +422,7 @@ func _list_models() -> void:
 	if request != _request_count:
 		return
 	if connection.error:
-		_status.text = tr("Can't list the models: %s") % connection.error
+		_set_status("TXT_ASSISTANT_CANT_LIST_MODELS_CONSTRUCTOR", [connection.error])
 		return
 	_set_model_menu(models)
 	if models and !models.has(_model_edit.text):
@@ -418,7 +455,7 @@ func _on_key_focus_exited() -> void:
 
 func _on_show_key_toggled(is_shown: bool) -> void:
 	_key_edit.secret = !is_shown
-	_show_key.text = tr("Hide") if is_shown else tr("Show")
+	_show_key.text = &"BUTTON_ASSISTANT_HIDE_KEY" if is_shown else &"BUTTON_ASSISTANT_SHOW_KEY"
 
 
 func _on_model_chosen(index: int) -> void:
@@ -429,11 +466,11 @@ func _on_connect_pressed() -> void:
 	var provider_id := _get_provider_id()
 	var model := _model_edit.text.strip_edges()
 	if !provider_id or !model:
-		_status.text = tr("Choose a model.")
+		_set_status("TXT_ASSISTANT_NEEDS_MODEL")
 		return
 	var key := _key_edit.text.strip_edges()
 	if _key_group.visible and !key:
-		_status.text = tr("Paste your key.")
+		_set_status("TXT_ASSISTANT_NEEDS_KEY")
 		return
 	var tool_set_name := ""
 	if _tool_sets.selected >= 0:
@@ -442,7 +479,7 @@ func _on_connect_pressed() -> void:
 	_request_count += 1
 	var request := _request_count
 	_connect_button.disabled = true
-	_status.text = tr("Asking %s to call a tool...") % model
+	_set_status("TXT_ASSISTANT_TESTING_CONSTRUCTOR", [model])
 	_fit()
 	var result: Dictionary = await _test.call(connection)
 	_connect_button.disabled = false
@@ -452,7 +489,7 @@ func _on_connect_pressed() -> void:
 	if result.ok:
 		_connections.save_connection(connection, _remember_key.button_pressed)
 		_remove_button.disabled = false
-	_status.text = message
+	_set_status(message)
 	_fit()
 
 

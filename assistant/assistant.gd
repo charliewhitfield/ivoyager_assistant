@@ -87,6 +87,10 @@ func _ready() -> void:
 	var enabled: bool = config.get_value("assistant", "enabled", false)
 	if !enabled:
 		return
+	var translations: Array = config.get_value("assistant", "translations", [])
+	for path: String in translations:
+		var translation: Translation = load(path)
+		TranslationServer.add_translation(translation)
 	_dispatcher = IVAssistantDispatcher.new(get_tree(), true)
 	var instructions_file: String = config.get_value("assistant", "instructions_file", "")
 	if instructions_file:
@@ -154,11 +158,12 @@ func open_setup_wizard() -> void:
 ## Confirms [param connection] with one request: the model is given the
 ## instructions and its tool set, and asked to call [constant TEST_TOOL].
 ## Returns [code]{"ok": bool, "message": String}[/code], the message for the
-## user. Build tool sets only once the simulator has started.
+## user, in their language. Build tool sets only once the simulator has started.
 func test_connection(connection: IVAssistantConnection) -> Dictionary:
 	var tool_set := get_tool_set(connection.tool_set_name)
 	if !tool_set:
-		return {"ok": false, "message": "The app has no tool set '%s'" % connection.tool_set_name}
+		return {"ok": false, "message": tr(&"TXT_ASSISTANT_NO_TOOL_SET_CONSTRUCTOR")
+				% connection.tool_set_name}
 	var definitions := tool_set.definitions.duplicate()
 	definitions.append(TEST_TOOL)
 	var messages: Array[Dictionary] = [connection.make_user_message(TEST_REQUEST)]
@@ -172,20 +177,20 @@ func test_connection(connection: IVAssistantConnection) -> Dictionary:
 		var arguments: Dictionary = tool_call.arguments
 		var greeting := str(arguments.get("greeting", "")).strip_edges()
 		if !greeting:
-			return {"ok": true, "message": "Connected: the model called the test tool."}
-		return {"ok": true, "message": "Connected. %s says: \"%s\"" % [assistant_name, greeting]}
+			return {"ok": true, "message": tr(&"TXT_ASSISTANT_TEST_CONNECTED")}
+		return {"ok": true, "message": tr(&"TXT_ASSISTANT_TEST_GREETING_CONSTRUCTOR")
+				% [assistant_name, greeting]}
 	if tool_calls:
 		var tool_name: String = tool_calls[0].name
-		return {"ok": true, "message": ("Connected, but the model called %s, not the test tool."
-				+ " It may follow instructions poorly.") % tool_name}
+		return {"ok": true, "message": tr(&"TXT_ASSISTANT_TEST_WRONG_TOOL_CONSTRUCTOR") % tool_name}
 	var text: String = reply.text
 	match reply.stop:
 		"refusal":
-			return {"ok": false, "message": "The model declined the test."}
+			return {"ok": false, "message": tr(&"TXT_ASSISTANT_TEST_DECLINED")}
 		"length":
-			return {"ok": false, "message": "The model's reply was cut off before it called a tool."}
-	return {"ok": false, "message": ("The model answered without calling a tool, so it may not"
-			+ " take tools. It said: \"%s\"") % text.strip_edges().left(300)}
+			return {"ok": false, "message": tr(&"TXT_ASSISTANT_TEST_CUT_OFF")}
+	return {"ok": false, "message": tr(&"TXT_ASSISTANT_TEST_NO_TOOL_CONSTRUCTOR")
+			% text.strip_edges().left(300)}
 
 
 ## Answers [param method] in process, as the TCP server answers a client's
