@@ -89,7 +89,7 @@ func send(instructions: String, tool_definitions: Array[Dictionary],
 		return {}
 	var reply := _parse_chat_response(json)
 	if !reply:
-		error = "%s sent a reply that can't be read" % provider_name
+		error = tr(&"TXT_ASSISTANT_UNREADABLE_REPLY_CONSTRUCTOR") % tr(provider_name)
 		return reply
 	if simple_schemas:
 		var tool_calls: Array[Dictionary] = reply.tool_calls
@@ -195,7 +195,7 @@ func _request(method: HTTPClient.Method, request_url: String, body: Variant,
 	var err := http.request(request_url, _get_headers(), method, body_text)
 	if err != OK:
 		http.queue_free()
-		error = "Can't send a request to %s (%s)" % [get_host(), error_string(err)]
+		error = tr(&"TXT_ASSISTANT_CANT_SEND_CONSTRUCTOR") % [get_host(), error_string(err)]
 		return null
 	_http = http
 	var completion: Array = await _http_completed
@@ -206,7 +206,7 @@ func _request(method: HTTPClient.Method, request_url: String, body: Variant,
 	var code: int = completion[1]
 	var response: PackedByteArray = completion[2]
 	if result == -1:
-		error = "Canceled"
+		error = tr(&"TXT_ASSISTANT_CANCELED")
 		return null
 	if result != HTTPRequest.RESULT_SUCCESS:
 		error = _get_result_error(result)
@@ -216,11 +216,11 @@ func _request(method: HTTPClient.Method, request_url: String, body: Variant,
 	if code >= 400:
 		var message := _get_error_message(json)
 		if !message:
-			message = text.left(200) if text else "no message"
-		error = "%s answered %s: %s" % [get_host(), code, message]
+			message = text.left(200) if text else tr(&"TXT_ASSISTANT_NO_MESSAGE")
+		error = tr(&"TXT_ASSISTANT_HTTP_ERROR_CONSTRUCTOR") % [get_host(), code, message]
 		return null
 	if json == null:
-		error = "%s sent a response that isn't JSON" % get_host()
+		error = tr(&"TXT_ASSISTANT_NOT_JSON_CONSTRUCTOR") % get_host()
 	return json
 
 
@@ -233,15 +233,14 @@ func _get_result_error(result: int) -> String:
 	var host := get_host()
 	match result:
 		HTTPRequest.RESULT_TIMEOUT:
-			return "%s didn't answer in time" % host
+			return tr(&"TXT_ASSISTANT_TIMEOUT_CONSTRUCTOR") % host
 		HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
-			return "A secure connection to %s failed" % host
+			return tr(&"TXT_ASSISTANT_TLS_FAILED_CONSTRUCTOR") % host
 		HTTPRequest.RESULT_CANT_RESOLVE:
-			return "Can't find %s; check the internet connection" % host
+			return tr(&"TXT_ASSISTANT_CANT_RESOLVE_CONSTRUCTOR") % host
 	if OS.has_feature("web"):
-		return ("Can't reach %s. A web page can reach only a server that allows it"
-				+ " (CORS), and a local one only with the browser's permission") % host
-	return "Can't reach %s" % host
+		return tr(&"TXT_ASSISTANT_CANT_REACH_WEB_CONSTRUCTOR") % host
+	return tr(&"TXT_ASSISTANT_CANT_REACH_CONSTRUCTOR") % host
 
 
 # The message of an error response from any provider this plugin knows.

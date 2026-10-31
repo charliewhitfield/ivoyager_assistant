@@ -508,6 +508,7 @@ context_file=""
 enabled=false
 assistant_name=""
 instructions_file=""
+translations=["res://addons/ivoyager_assistant/text/assistant_text.en.translation"]
 providers=["ollama", "lm_studio", "llama_server", "gemini", "groq", "openrouter", "anthropic", "openai", "poe"]
 preset_provider=""
 small_model_tool_set="full"
@@ -559,6 +560,7 @@ The `[assistant]` section configures the user's assistant:
 - `feedback_url` — Where the setup wizard's experimental notice asks users to send feedback (default: the I, Voyager discussions; empty for no link).
 - `show_api_commands` — Whether a chat box shows the tools the assistant calls (default: false).
 - `show_api_commands_setting` — Whether the user may change that: in an I, Voyager Core project, `IVAssistant` registers user setting `show_api_commands` with `IVSettingsManager`, defaulting to `show_api_commands`, which the project may show as an option (default: true). False holds `show_api_commands` for every user.
+- `translations` — The translations of the plugin's text (`text/assistant_text.csv`: the chat box, the setup wizard, the providers' notes and the messages they show) that `IVAssistant` adds while enabled (default: English). Godot adds a project's own translations first, and the first added wins, so a project gives one of the plugin's text keys new words in a translation of its own.
 - `providers` — The model providers the setup wizard offers, in order, each an `[assistant_provider_<id>]` section (§12.4).
 - `preset_provider` — A provider every user gets, which hides the setup wizard (default: empty).
 - `small_model_tool_set`, `large_model_tool_set` — The tool set a new connection gets, by its provider's `small_models` (§12.4) (default: `full`).
@@ -901,7 +903,7 @@ The user connects the assistant to a model of their choosing: a server on their 
 
 | Key | Meaning |
 |---|---|
-| `name` | Display name. |
+| `name` | Display name, or its text key. |
 | `adapter` | `"openai"` (OpenAI-compatible chat completions; the default), `"anthropic"` (Anthropic's Messages API), or the path of a project's `IVAssistantConnection` script. |
 | `url` | The API base, without a trailing slash. |
 | `local` | Whether the server runs on the user's computer (false). |
@@ -909,7 +911,7 @@ The user connects the assistant to a model of their choosing: a server on their 
 | `needs_key` | Whether the user gives a key (not `local`). |
 | `key_url`, `site` | Where the user gets a key; where they learn more or download the server. |
 | `model` | The model offered first. |
-| `note`, `web_note` | What the wizard says about it, and adds in a web build. |
+| `note`, `web_note` | What the wizard says about it, and adds in a web build: a text key or text. |
 | `web` | Whether a web build offers it (true). |
 | `simple_schemas` | Whether its tool parameters must be simplified (false). |
 

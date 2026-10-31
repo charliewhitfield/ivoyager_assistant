@@ -107,14 +107,14 @@ func send(text: String) -> void:
 	var n_requests := 0
 	while true:
 		if n_requests == max_requests_per_turn:
-			error = tr("Stopped after %s requests to the model without an answer.") % n_requests
+			error = tr(&"TXT_ASSISTANT_REQUEST_LIMIT_CONSTRUCTOR") % n_requests
 			break
 		n_requests += 1
 		var reply := await connection.send(_instructions, definitions, messages)
 		if turn != _turn:
 			return # cleared
 		if _is_canceled:
-			error = tr("Stopped.")
+			error = tr(&"TXT_ASSISTANT_STOPPED")
 			break
 		if !reply:
 			error = connection.error
@@ -206,7 +206,7 @@ func _make_result(id: String, result: Variant) -> Dictionary:
 func _get_stop_error(stop: String) -> String:
 	match stop:
 		"length":
-			return tr("The reply was cut off.")
+			return tr(&"TXT_ASSISTANT_REPLY_CUT_OFF")
 		"refusal":
-			return tr("The model declined to answer.")
+			return tr(&"TXT_ASSISTANT_MODEL_DECLINED")
 	return ""

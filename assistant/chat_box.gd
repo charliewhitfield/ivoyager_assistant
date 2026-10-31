@@ -101,6 +101,7 @@ func _ready() -> void:
 	_conversation.tool_called.connect(_on_tool_called)
 	_conversation.turn_finished.connect(_on_turn_finished)
 	_conversation.cleared.connect(_on_cleared)
+	_show_names()
 	_show_connection()
 
 
@@ -113,6 +114,11 @@ func _notification(what: int) -> void:
 				_scroll_to_end()
 				if _message_edit.is_visible_in_tree():
 					_message_edit.grab_focus.call_deferred()
+		NOTIFICATION_TRANSLATION_CHANGED:
+			# Composed text, which a control can't retranslate itself.
+			if _conversation:
+				_show_names()
+				_show_status()
 
 
 func _build() -> void:
@@ -140,11 +146,11 @@ func _build() -> void:
 	_dismiss_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	var dismiss_button := Button.new()
 	_dismiss_row.add_child(dismiss_button)
-	dismiss_button.text = tr("Dismiss")
+	dismiss_button.text = &"BUTTON_ASSISTANT_DISMISS"
 	dismiss_button.pressed.connect(_on_dismiss_pressed)
 	_dont_show_again = CheckBox.new()
 	_dismiss_row.add_child(_dont_show_again)
-	_dont_show_again.text = tr("Don't show again")
+	_dont_show_again.text = &"CKBX_ASSISTANT_DONT_SHOW_AGAIN"
 	_input_row = HBoxContainer.new()
 	add_child(_input_row)
 	_message_edit = LineEdit.new()
@@ -154,12 +160,12 @@ func _build() -> void:
 	_message_edit.gui_input.connect(_on_message_edit_gui_input)
 	_send_button = Button.new()
 	_input_row.add_child(_send_button)
-	_send_button.text = tr("Send")
+	_send_button.text = &"BUTTON_ASSISTANT_SEND"
 	_send_button.pressed.connect(_on_send_pressed)
 	_new_button = Button.new()
 	_input_row.add_child(_new_button)
-	_new_button.text = tr("New")
-	_new_button.tooltip_text = tr("Start a new conversation")
+	_new_button.text = &"BUTTON_ASSISTANT_NEW"
+	_new_button.tooltip_text = &"HINT_ASSISTANT_NEW"
 	_new_button.pressed.connect(_on_new_pressed)
 
 
@@ -176,8 +182,14 @@ func _resize() -> void:
 	_scroll.custom_maximum_size = Vector2(-1.0, transcript_height)
 
 
-func _show_connection() -> void:
+func _show_names() -> void:
 	var assistant_name := _conversation.assistant_name
+	_setup_button.text = tr(&"TXT_ASSISTANT_SET_UP_CONSTRUCTOR") % assistant_name
+	_message_edit.placeholder_text = tr(&"TXT_ASSISTANT_ASK_CONSTRUCTOR") % assistant_name
+	_message_edit.accessibility_name = _message_edit.placeholder_text
+
+
+func _show_connection() -> void:
 	var connection := _conversation.connections.connection
 	_input_row.visible = connection != null
 	var has_setup_wizard: bool = _assistant.call(&"has_setup_wizard")
@@ -185,22 +197,23 @@ func _show_connection() -> void:
 	_setup_note.visible = is_offering_setup and setup_note != ""
 	_setup_button.visible = is_offering_setup
 	_dismiss_row.visible = is_offering_setup and offer_dismiss
-	_setup_button.text = tr("Set up %s...") % assistant_name
-	_message_edit.placeholder_text = tr("Ask %s") % assistant_name
-	_message_edit.accessibility_name = _message_edit.placeholder_text
-	_show_running(false)
+	_show_status()
 	if !connection:
-		_status.text = tr("%s isn't connected to an AI model.") % assistant_name
-		_status.show()
 		return
-	_add_entry(tr("%s is using %s, from %s.") % [assistant_name, connection.model,
-			tr(connection.provider_name)], note_color)
+	_add_entry(tr(&"TXT_ASSISTANT_USING_MODEL_CONSTRUCTOR") % [_conversation.assistant_name,
+			connection.model, tr(connection.provider_name)], note_color)
 
 
-func _show_running(is_running: bool) -> void:
-	_status.text = tr("%s is thinking...") % _conversation.assistant_name if is_running else ""
+func _show_status() -> void:
+	var assistant_name := _conversation.assistant_name
+	var is_running := _conversation.is_running()
+	_status.text = ""
+	if is_running:
+		_status.text = tr(&"TXT_ASSISTANT_THINKING_CONSTRUCTOR") % assistant_name
+	elif !_conversation.connections.connection:
+		_status.text = tr(&"TXT_ASSISTANT_NOT_CONNECTED_CONSTRUCTOR") % assistant_name
 	_status.visible = _status.text != ""
-	_send_button.text = tr("Stop") if is_running else tr("Send")
+	_send_button.text = &"BUTTON_ASSISTANT_STOP" if is_running else &"BUTTON_ASSISTANT_SEND"
 
 
 func _add_entry(text: String, color := Color.TRANSPARENT, is_live := false) -> Label:
@@ -277,7 +290,7 @@ func _format_tool_call(tool_name: String, arguments: Dictionary) -> String:
 
 func _on_turn_started(text: String) -> void:
 	_add_entry(text, user_color)
-	_show_running(true)
+	_show_status()
 
 
 func _on_reply_received(text: String) -> void:
@@ -300,7 +313,7 @@ func _on_show_api_commands_changed(is_shown: bool) -> void:
 
 
 func _on_turn_finished(error: String, unsent_text: String) -> void:
-	_show_running(false)
+	_show_status()
 	if error:
 		_add_entry(error, error_color)
 	if unsent_text and !_message_edit.text:
